@@ -78,7 +78,7 @@
 ##	Windows NT version 4.0, Cygnus CygWin/32 beta 19
 ##
 CC = gcc
-OFLAGS = -O0 -g -Wall
+OFLAGS = -O0 -g -Wall -fcommon
 MFLAGS = `./sysprobe -flags`
 _MFLAGS = `../sysprobe -flags`
 MLIBS  = `./sysprobe -libs` -lm
@@ -279,8 +279,7 @@ CFLAGS = $(MFLAGS) $(FFLAGS) $(OFLAGS) $(BINUTILS_INC) $(BINUTILS_LIB)
 #
 # all the sources
 #
-SRCS =	main.c sim-fast.c sim-safe.c sim-cache.c sim-profile.c \
-	sim-eio.c sim-bpred.c sim-cheetah.c sim-outorder.c \
+SRCS =	main.c sim-smt.c \
 	memory.c regs.c cache.c bpred.c ptrace.c eventq.c \
 	resource.c endian.c dlite.c symbol.c eval.c options.c range.c \
 	eio.c stats.c endian.c misc.c \

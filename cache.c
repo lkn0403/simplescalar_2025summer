@@ -380,6 +380,7 @@ cache_create(char *name,		/* name of the cache */
 	  /* invalidate new cache block */
 	  blk->status = 0;
 	  blk->tag = 0;
+    blk->tid = 0;
 	  blk->ready = 0;
 	  blk->user_data = (usize != 0
 			    ? (byte_t *)calloc(usize, sizeof(byte_t)) : NULL);
@@ -499,6 +500,7 @@ cache_stats(struct cache_t *cp,		/* cache instance */
 unsigned int				/* latency of access in cycles */
 cache_access(struct cache_t *cp,	/* cache to access */
 	     enum mem_cmd cmd,		/* access type, Read or Write */
+       word_t tid,          /* thread id */
 	     md_addr_t addr,		/* address of access */
 	     void *vp,			/* ptr to buffer for input/output */
 	     int nbytes,		/* number of bytes to access */
@@ -534,6 +536,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
     {
       /* hit in the same block */
       blk = cp->last_blk;
+      if (blk->tid == tid)
       goto cache_fast_hit;
     }
     
@@ -546,7 +549,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
 	   blk;
 	   blk=blk->hash_next)
 	{
-	  if (blk->tag == tag && (blk->status & CACHE_BLK_VALID))
+	  if (blk->tag == tag && (blk->status & CACHE_BLK_VALID) && blk->tid == tid)
 	    goto cache_hit;
 	}
     }
@@ -557,7 +560,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
 	   blk;
 	   blk=blk->way_next)
 	{
-	  if (blk->tag == tag && (blk->status & CACHE_BLK_VALID))
+	  if (blk->tag == tag && (blk->status & CACHE_BLK_VALID) && blk->tid == tid)
 	    goto cache_hit;
 	}
     }
@@ -622,6 +625,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
 
   /* update block tags */
   repl->tag = tag;
+  repl->tid = tid;
   repl->status = CACHE_BLK_VALID;	/* dirty bit set on update */
 
   /* read data block */
@@ -724,6 +728,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
    invariants */
 int					/* non-zero if access would hit */
 cache_probe(struct cache_t *cp,		/* cache instance to probe */
+      word_t tid,          /* thread id */
 	    md_addr_t addr)		/* address of block to probe */
 {
   md_addr_t tag = CACHE_TAG(cp, addr);
@@ -741,7 +746,7 @@ cache_probe(struct cache_t *cp,		/* cache instance to probe */
 	 blk;
 	 blk=blk->hash_next)
     {	
-      if (blk->tag == tag && (blk->status & CACHE_BLK_VALID))
+      if (blk->tag == tag && (blk->status & CACHE_BLK_VALID) && blk->tid == tid)
 	  return TRUE;
     }
   }
@@ -752,7 +757,7 @@ cache_probe(struct cache_t *cp,		/* cache instance to probe */
 	 blk;
 	 blk=blk->way_next)
     {
-      if (blk->tag == tag && (blk->status & CACHE_BLK_VALID))
+      if (blk->tag == tag && (blk->status & CACHE_BLK_VALID) && blk->tid == tid)
 	  return TRUE;
     }
   }
@@ -803,6 +808,7 @@ cache_flush(struct cache_t *cp,		/* cache instance to flush */
    the block flush operation */
 unsigned int				/* latency of flush operation */
 cache_flush_addr(struct cache_t *cp,	/* cache instance to flush */
+    word_t tid,          /* thread id */
 		 md_addr_t addr,	/* address of block to flush */
 		 tick_t now)		/* time of cache flush */
 {
@@ -820,7 +826,7 @@ cache_flush_addr(struct cache_t *cp,	/* cache instance to flush */
 	   blk;
 	   blk=blk->hash_next)
 	{
-	  if (blk->tag == tag && (blk->status & CACHE_BLK_VALID))
+	  if (blk->tag == tag && (blk->status & CACHE_BLK_VALID) && blk->tid == tid)
 	    break;
 	}
     }
@@ -831,7 +837,7 @@ cache_flush_addr(struct cache_t *cp,	/* cache instance to flush */
 	   blk;
 	   blk=blk->way_next)
 	{
-	  if (blk->tag == tag && (blk->status & CACHE_BLK_VALID))
+	  if (blk->tag == tag && (blk->status & CACHE_BLK_VALID) && blk->tid == tid)
 	    break;
 	}
     }

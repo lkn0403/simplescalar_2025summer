@@ -120,6 +120,7 @@ struct cache_blk_t
   /* since hash table lists are typically small, there is no previous
      pointer, deletion requires a trip through the hash table bucket list */
   md_addr_t tag;		/* data block tag value */
+  word_t tid;    /* thread id value */
   unsigned int status;		/* block status, see CACHE_BLK_* defs above */
   tick_t ready;		/* time when block will be accessible, field
 				   is set when a miss fetch is initiated */
@@ -257,6 +258,7 @@ void cache_stats(struct cache_t *cp, FILE *stream);
 unsigned int				/* latency of access in cycles */
 cache_access(struct cache_t *cp,	/* cache to access */
 	     enum mem_cmd cmd,		/* access type, Read or Write */
+       word_t tid,          /* thread id */
 	     md_addr_t addr,		/* address of access */
 	     void *vp,			/* ptr to buffer for input/output */
 	     int nbytes,		/* number of bytes to access */
@@ -266,24 +268,25 @@ cache_access(struct cache_t *cp,	/* cache to access */
 
 /* cache access functions, these are safe, they check alignment and
    permissions */
-#define cache_double(cp, cmd, addr, p, now, udata)	\
-  cache_access(cp, cmd, addr, p, sizeof(double), now, udata)
-#define cache_float(cp, cmd, addr, p, now, udata)	\
-  cache_access(cp, cmd, addr, p, sizeof(float), now, udata)
-#define cache_dword(cp, cmd, addr, p, now, udata)	\
-  cache_access(cp, cmd, addr, p, sizeof(long long), now, udata)
-#define cache_word(cp, cmd, addr, p, now, udata)	\
-  cache_access(cp, cmd, addr, p, sizeof(int), now, udata)
-#define cache_half(cp, cmd, addr, p, now, udata)	\
-  cache_access(cp, cmd, addr, p, sizeof(short), now, udata)
-#define cache_byte(cp, cmd, addr, p, now, udata)	\
-  cache_access(cp, cmd, addr, p, sizeof(char), now, udata)
+#define cache_double(cp, cmd, tid, addr, p, now, udata)	\
+  cache_access(cp, cmd, tid, addr, p, sizeof(double), now, udata)
+#define cache_float(cp, cmd, tid, addr, p, now, udata)	\
+  cache_access(cp, cmd, tid, addr, p, sizeof(float), now, udata)
+#define cache_dword(cp, cmd, tid, addr, p, now, udata)	\
+  cache_access(cp, cmd, tid, addr, p, sizeof(long long), now, udata)
+#define cache_word(cp, cmd, tid, addr, p, now, udata)	\
+  cache_access(cp, cmd, tid, addr, p, sizeof(int), now, udata)
+#define cache_half(cp, cmd, tid, addr, p, now, udata)	\
+  cache_access(cp, cmd, tid, addr, p, sizeof(short), now, udata)
+#define cache_byte(cp, cmd, tid, addr, p, now, udata)	\
+  cache_access(cp, cmd, tid, addr, p, sizeof(char), now, udata)
 
 /* return non-zero if block containing address ADDR is contained in cache
    CP, this interface is used primarily for debugging and asserting cache
    invariants */
 int					/* non-zero if access would hit */
 cache_probe(struct cache_t *cp,		/* cache instance to probe */
+      word_t tid,          /* thread id */
 	    md_addr_t addr);		/* address of block to probe */
 
 /* flush the entire cache, returns latency of the operation */
@@ -295,6 +298,7 @@ cache_flush(struct cache_t *cp,		/* cache instance to flush */
    the block flush operation */
 unsigned int				/* latency of flush operation */
 cache_flush_addr(struct cache_t *cp,	/* cache instance to flush */
+    word_t tid,          /* thread id */
 		 md_addr_t addr,	/* address of block to flush */
 		 tick_t now);		/* time of cache flush */
 
