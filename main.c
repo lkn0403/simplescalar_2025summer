@@ -75,6 +75,8 @@
 #include "loader.h"
 #include "sim.h"
 
+#define MAX_THREAD 4
+
 /* stats signal handler */
 static void
 signal_sim_stats(int sigtype)
@@ -133,6 +135,9 @@ FILE *sim_progfd = NULL;
 
 /* track first argument orphan, this is the program to execute */
 static int exec_index = -1;
+static int thread_num = 0;
+static int exec_start[MAX_THREAD];
+static int exec_end[MAX_THREAD];
 
 /* dump help information */
 static int help_me;
@@ -293,6 +298,16 @@ main(int argc, char **argv, char **envp)
   /* parse simulator options */
   exec_index = -1;
   opt_process_options(sim_odb, argc, argv);
+
+  for (int index = 0; index < argc; index++) {
+    if (!strcmp(argv[index], "--")) {
+      exec_start[thread_num] = ++index;
+      while (index < argc && strcmp(argv[index], "--"))
+        index++;
+      exec_end[thread_num] = index;
+      thread_num++;
+    }
+  }
 
   /* redirect I/O? */
   if (sim_simout != NULL)
