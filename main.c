@@ -298,14 +298,17 @@ main(int argc, char **argv, char **envp)
   /* parse simulator options */
   exec_index = -1;
   opt_process_options(sim_odb, argc, argv);
-
-  for (int index = 0; index < argc; index++) {
-    if (!strcmp(argv[index], "--")) {
-      exec_start[thread_num] = ++index;
-      while (index < argc && strcmp(argv[index], "--"))
-        index++;
-      exec_end[thread_num] = index;
-      thread_num++;
+  if (exec_index == -1) {
+    thread_num = 1;
+  } else {
+    for (int index = 0; index < argc; index++) {
+      if (!strcmp(argv[index], "--")) {
+        exec_start[thread_num] = ++index;
+        while (index < argc && strcmp(argv[index], "--"))
+          index++;
+        exec_end[thread_num] = index;
+        thread_num++;
+      }
     }
   }
 
@@ -357,7 +360,7 @@ main(int argc, char **argv, char **envp)
     }
 
   /* exec_index is set in orphan_fn() */
-  if (exec_index == -1)
+  if (exec_index == -1 && thread_num == 0)
     {
       /* executable was not found */
       fprintf(stderr, "error: no executable specified\n");
@@ -390,10 +393,13 @@ main(int argc, char **argv, char **envp)
   md_init_decoder();
 
   /* initialize all simulation modules */
-  sim_init();
+  sim_init_smt(thread_num);
 
   /* initialize architected state */
-  sim_load_prog(argv[exec_index], argc-exec_index, argv+exec_index, envp);
+  for (int index = 0; index < thread_num; index++) {
+    sim_load_prog_smt(argv[exec_start[index]], exec_end[index] - exec_start[index],
+        argv + exec_start[index], index, envp);
+  }
 
   /* register all simulator stats */
   sim_sdb = stat_new();

@@ -80,17 +80,19 @@
  * pipeline operations.
  */
 
-#define MAX_THREAD 4
 /* simulated registers */
-static struct regs_t regs[MAX_THREAD];
+static struct regs_t *regs = NULL;
 
 /* simulated memory */
-static struct mem_t *mem = NULL;
+static struct mem_t **mem = NULL;
 
 
 /*
  * simulator options
  */
+
+/* number of thread to execute */
+static unsigned int thread_num;
 
 /* maximum number of inst's to execute */
 static unsigned int max_insts;
@@ -396,6 +398,10 @@ static struct res_pool *fu_pool = NULL;
 static struct stat_stat_t *pcstat_stats[MAX_PCSTAT_VARS];
 static counter_t pcstat_lastvals[MAX_PCSTAT_VARS];
 static struct stat_stat_t *pcstat_sdists[MAX_PCSTAT_VARS];
+
+static int fetch_last_thread;
+static int fetch_max;
+static int fetch_cnt;
 
 /* wedge all stat values into a counter_t */
 #define STATVAL(STAT)							\
@@ -1365,16 +1371,26 @@ static void fetch_init(void);
 
 /* initialize the simulator */
 void
-sim_init(void)
+sim_init_smt(int num)
 {
   sim_num_refs = 0;
+  thread_num = num;
+
+  regs = (struct regs_t *)
+    calloc(thread_num, sizeof(struct regs_t));
+  mem = (struct mem_t **)
+    calloc(thread_num, sizeof(struct mem_t *));
 
   /* allocate and initialize register file */
-  regs_init(&regs);
+  for (int index = 0; index < thread_num; index++) {
+    char mem_name[32];
+    sprintf(mem_name, "mem%d", index);
 
-  /* allocate and initialize memory space */
-  mem = mem_create("mem");
-  mem_init(mem);
+    regs_init(&regs[index]);
+    mem[index] = mem_create(mem_name);
+    mem_init(mem[index]);
+  }
+
 }
 
 /* default register state accessor, used by DLite */
@@ -1405,39 +1421,41 @@ simoo_mstate_obj(FILE *stream,			/* output stream */
 
 /* load program into simulated state */
 void
-sim_load_prog(char *fname,		/* program to load */
-	      int argc, char **argv,	/* program arguments */
+sim_load_prog_smt(char *fname,		/* program to load */
+	      int argc, char **argv, int index,	/* program arguments */
 	      char **envp)		/* program environment */
 {
   /* load program text and data, set up environment, memory, and regs */
-  ld_load_prog(fname, argc, argv, envp, &regs, mem, TRUE);
+  ld_load_prog(fname, argc, argv, envp, &regs[index], mem[index], TRUE);
 
-  /* initialize here, so symbols can be loaded */
-  if (ptrace_nelt == 2)
-    {
-      /* generate a pipeline trace */
-      ptrace_open(/* fname */ptrace_opts[0], /* range */ptrace_opts[1]);
-    }
-  else if (ptrace_nelt == 0)
-    {
-      /* no pipetracing */;
-    }
-  else
-    fatal("bad pipetrace args, use: <fname|stdout|stderr> <range>");
+  if (!index) {
+    /* initialize here, so symbols can be loaded */
+    if (ptrace_nelt == 2)
+      {
+        /* generate a pipeline trace */
+        ptrace_open(/* fname */ptrace_opts[0], /* range */ptrace_opts[1]);
+      }
+    else if (ptrace_nelt == 0)
+      {
+        /* no pipetracing */;
+      }
+    else
+      fatal("bad pipetrace args, use: <fname|stdout|stderr> <range>");
 
-  /* finish initialization of the simulation engine */
-  fu_pool = res_create_pool("fu-pool", fu_config, N_ELT(fu_config));
-  rslink_init(MAX_RS_LINKS);
-  tracer_init();
-  fetch_init();
-  cv_init();
-  eventq_init();
-  readyq_init();
-  ruu_init();
-  lsq_init();
+    /* finish initialization of the simulation engine */
+    fu_pool = res_create_pool("fu-pool", fu_config, N_ELT(fu_config));
+    rslink_init(MAX_RS_LINKS);
+    tracer_init();
+    fetch_init();
+    cv_init();
+    eventq_init();
+    readyq_init();
+    ruu_init();
+    lsq_init();
 
-  /* initialize the DLite debugger */
-  dlite_init(simoo_reg_obj, simoo_mem_obj, simoo_mstate_obj);
+    /* initialize the DLite debugger */
+    dlite_init(simoo_reg_obj, simoo_mem_obj, simoo_mstate_obj);
+  }
 }
 
 /* dump simulator-specific auxiliary simulator statistics */
@@ -4430,15 +4448,18 @@ sim_main(void)
      execution paths */
   signal(SIGFPE, SIG_IGN);
 
+  for (int index = 0; index < thread_num; index++) {
   /* set up program entry state */
-  regs.regs_PC = ld_prog_entry;
-  regs.regs_NPC = regs.regs_PC + sizeof(md_inst_t);
-
+    regs[index].regs_PC = ld_prog_entry;
+    regs[index].regs_NPC = regs[index].regs_PC + sizeof(md_inst_t);
+  }
   /* check for DLite debugger entry condition */
-  if (dlite_check_break(regs.regs_PC, /* no access */0, /* addr */0, 0, 0))
-    dlite_main(regs.regs_PC, regs.regs_PC + sizeof(md_inst_t),
+  if (dlite_check_break(regs[0].regs_PC, /* no access */0, /* addr */0, 0, 0))
+    dlite_main(regs[0].regs_PC, regs[0].regs_PC + sizeof(md_inst_t),
 	       sim_cycle, &regs, mem);
-
+  fetch_last_thread = 0;
+  fetch_cnt = 0;
+  fetch_max = ruu_ifq_size / thread_num;
   /* fast forward simulator loop, performs functional simulation for
      FASTFWD_COUNT insts, then turns on performance (timing) simulation */
   if (fastfwd_count > 0)
@@ -4459,16 +4480,18 @@ sim_main(void)
 
       fprintf(stderr, "sim: ** fast forwarding %d insts **\n", fastfwd_count);
 
-      for (icount=0; icount < fastfwd_count; icount++)
-	{
-	  /* maintain $r0 semantics */
-	  regs.regs_R[MD_REG_ZERO] = 0;
-#ifdef TARGET_ALPHA
-	  regs.regs_F.d[MD_REG_ZERO] = 0.0;
-#endif /* TARGET_ALPHA */
+      for (icount=0; icount < fastfwd_count; icount++) {
+        for (int index = 0; index < thread_num; index++) {
+              /* maintain $r0 semantics */
+              regs[index].regs_R[MD_REG_ZERO] = 0;
+          #ifdef TARGET_ALPHA
+              regs[index].regs_F.d[MD_REG_ZERO] = 0.0;
+          #endif /* TARGET_ALPHA */
+
+        }
 
 	  /* get the next instruction to execute */
-	  MD_FETCH_INST(inst, mem, regs.regs_PC);
+	  MD_FETCH_INST(inst, mem[fetch_last_thread], regs[fetch_last_thread].regs_PC);
 
 	  /* set default reference address */
 	  addr = 0; is_write = FALSE;
@@ -4499,7 +4522,7 @@ sim_main(void)
 	    }
 
 	  if (fault != md_fault_none)
-	    fatal("fault (%d) detected @ 0x%08p", fault, regs.regs_PC);
+	    fatal("fault (%d) detected @ 0x%08p", fault, regs[fetch_last_thread].regs_PC);
 
 	  /* update memory access stats */
 	  if (MD_OP_FLAGS(op) & F_MEM)
@@ -4509,14 +4532,16 @@ sim_main(void)
 	    }
 
 	  /* check for DLite debugger entry condition */
-	  if (dlite_check_break(regs.regs_NPC,
+	  if (dlite_check_break(regs[fetch_last_thread].regs_NPC,
 				is_write ? ACCESS_WRITE : ACCESS_READ,
 				addr, sim_num_insn, sim_num_insn))
-	    dlite_main(regs.regs_PC, regs.regs_NPC, sim_num_insn, &regs, mem);
+	    dlite_main(regs[fetch_last_thread].regs_PC, regs[fetch_last_thread].regs_NPC, sim_num_insn, &regs, mem);
 
 	  /* go to the next instruction */
-	  regs.regs_PC = regs.regs_NPC;
-	  regs.regs_NPC += sizeof(md_inst_t);
+	  regs[fetch_last_thread].regs_PC = regs[fetch_last_thread].regs_NPC;
+	  regs[fetch_last_thread].regs_NPC += sizeof(md_inst_t);
+    if (fetch_cnt == fetch_max - 1) fetch_last_thread = (fetch_last_thread + 1) % thread_num;
+    fetch_cnt = (fetch_cnt + 1) % fetch_max;
 	}
     }
 
