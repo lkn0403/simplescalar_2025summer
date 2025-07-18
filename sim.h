@@ -61,6 +61,8 @@
 #include "regs.h"
 #include "memory.h"
 
+#define MAX_THREAD 4
+
 /* set to non-zero when simulator should dump statistics */
 extern int sim_dump_stats;
 

@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "dlite.h": "c"
+        "dlite.h": "c",
+        "*.def": "c"
     }
 }

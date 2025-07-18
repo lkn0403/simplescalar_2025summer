@@ -75,7 +75,6 @@
 #include "loader.h"
 #include "sim.h"
 
-#define MAX_THREAD 4
 
 /* stats signal handler */
 static void
