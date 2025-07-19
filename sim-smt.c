@@ -403,6 +403,8 @@ static int fetch_last_thread;
 static int fetch_max;
 static int fetch_cnt;
 
+extern unsigned int current_dlite_tid;
+
 /* wedge all stat values into a counter_t */
 #define STATVAL(STAT)							\
   ((STAT)->sc == sc_int							\
@@ -1399,7 +1401,8 @@ sim_init_smt(int num)
 
 /* default register state accessor, used by DLite */
 static char *					/* err str, NULL for no err */
-simoo_reg_obj(struct regs_t *regs,		/* registers to access */
+simoo_reg_obj(int tid,
+        struct regs_t *regs,		/* registers to access */
 	      int is_write,			/* access type */
 	      enum md_reg_type rt,		/* reg bank to probe */
 	      int reg,				/* register number */
@@ -1425,7 +1428,7 @@ simoo_mstate_obj(FILE *stream,			/* output stream */
 
 /* load program into simulated state */
 void
-sim_load_prog_smt(char *fname,		/* program to load */
+sim_load_prog_smt(int tid, char *fname,		/* program to load */
 	      int argc, char **argv, int index,	/* program arguments */
 	      char **envp)		/* program environment */
 {
@@ -1458,7 +1461,7 @@ sim_load_prog_smt(char *fname,		/* program to load */
     lsq_init();
 
     /* initialize the DLite debugger */
-    dlite_init(simoo_reg_obj, simoo_mem_obj, simoo_mstate_obj);
+    dlite_init(tid, simoo_reg_obj, simoo_mem_obj, simoo_mstate_obj);
   }
 }
 
@@ -2124,28 +2127,28 @@ cv_init(void)
   }
 
 // /* dump the contents of the create vector */
-// static void
-// cv_dump(FILE *stream)				/* output stream */
-// {
-//   int i;
-//   struct CV_link ent;
+static void
+cv_dump(int tid, FILE *stream)				/* output stream */
+{
+  int i;
+  struct CV_link ent;
 
-//   if (!stream)
-//     stream = stderr;
+  if (!stream)
+    stream = stderr;
 
-//   fprintf(stream, "** create vector state **\n");
+  fprintf(stream, "** create vector state **\n");
 
-//   for (i=0; i < MD_TOTAL_REGS; i++)
-//     {
-//       ent = CREATE_VECTOR(i);
-//       if (!ent.rs)
-// 	fprintf(stream, "[cv%02d]: from architected reg file\n", i);
-//       else
-// 	fprintf(stream, "[cv%02d]: from %s, idx: %d\n",
-// 		i, (ent.rs->in_LSQ ? "LSQ" : "RUU"),
-// 		(int)(ent.rs - (ent.rs->in_LSQ ? LSQ : RUU)));
-//     }
-// }
+  for (i=0; i < MD_TOTAL_REGS; i++)
+    {
+      ent = CREATE_VECTOR(tid, i);
+      if (!ent.rs)
+	fprintf(stream, "[cv%02d]: from architected reg file\n", i);
+      else
+	fprintf(stream, "[cv%02d]: from %s, idx: %d\n",
+		i, (ent.rs->in_LSQ ? "LSQ" : "RUU"),
+		(int)(ent.rs - (ent.rs->in_LSQ ? LSQ : RUU)));
+    }
+}
 
 
 /*
@@ -2397,7 +2400,7 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
  */
 
 /* forward declarations */
-// static void tracer_recover(void);
+static void tracer_recover(int tid);
 
 /* writeback completed operation results from the functional units to RUU,
    at this point, the output dependency chains of completing instructions
@@ -2981,57 +2984,57 @@ static int fetch_tail, fetch_head;	/* head and tail pointers of queue */
    before the first mis-predicted branch; this is accomplished by resetting
    all register value copied-on-write bitmasks are reset, and the speculative
    memory hash table is cleared */
-// static void
-// tracer_recover(int tid)
-// {
-//   int i;
-//   struct spec_mem_ent *ent, *ent_next;
+static void
+tracer_recover(int tid)
+{
+  int i;
+  struct spec_mem_ent *ent, *ent_next;
 
-//   /* better be in mis-speculative trace generation mode */
-//   if (!spec_mode)
-//     panic("cannot recover unless in speculative mode");
+  /* better be in mis-speculative trace generation mode */
+  if (!spec_mode)
+    panic("cannot recover unless in speculative mode");
 
-//   /* reset to non-speculative trace generation mode */
-//   spec_mode = FALSE;
+  /* reset to non-speculative trace generation mode */
+  spec_mode = FALSE;
 
-//   /* reset copied-on-write register bitmasks back to non-speculative state */
-//   BITMAP_CLEAR_MAP(use_spec_R, R_BMAP_SZ);
-//   BITMAP_CLEAR_MAP(use_spec_F, F_BMAP_SZ);
-//   BITMAP_CLEAR_MAP(use_spec_C, C_BMAP_SZ);
+  /* reset copied-on-write register bitmasks back to non-speculative state */
+  BITMAP_CLEAR_MAP(use_spec_R, R_BMAP_SZ);
+  BITMAP_CLEAR_MAP(use_spec_F, F_BMAP_SZ);
+  BITMAP_CLEAR_MAP(use_spec_C, C_BMAP_SZ);
 
-//   /* reset memory state back to non-speculative state */
-//   /* FIXME: could version stamps be used here?!?!? */
-//   for (i=0; i<STORE_HASH_SIZE; i++)
-//     {
-//       /* release all hash table buckets */
-//       for (ent=store_htable[i]; ent; ent=ent_next)
-// 	{
-// 	  ent_next = ent->next;
-// 	  ent->next = bucket_free_list;
-// 	  bucket_free_list = ent;
-// 	}
-//       store_htable[i] = NULL;
-//     }
+  /* reset memory state back to non-speculative state */
+  /* FIXME: could version stamps be used here?!?!? */
+  for (i=0; i<STORE_HASH_SIZE; i++)
+    {
+      /* release all hash table buckets */
+      for (ent=store_htable[i]; ent; ent=ent_next)
+	{
+	  ent_next = ent->next;
+	  ent->next = bucket_free_list;
+	  bucket_free_list = ent;
+	}
+      store_htable[i] = NULL;
+    }
 
-//   /* if pipetracing, indicate squash of instructions in the inst fetch queue */
-//   if (ptrace_active)
-//     {
-//       while (fetch_num != 0)
-// 	{
-// 	  /* squash the next instruction from the IFETCH -> DISPATCH queue */
-// 	  ptrace_endinst(fetch_data[fetch_head].ptrace_seq);
+  /* if pipetracing, indicate squash of instructions in the inst fetch queue */
+  if (ptrace_active)
+    {
+      while (fetch_num != 0)
+	{
+	  /* squash the next instruction from the IFETCH -> DISPATCH queue */
+	  ptrace_endinst(fetch_data[fetch_head].ptrace_seq);
 
-// 	  /* consume instruction from IFETCH -> DISPATCH queue */
-// 	  fetch_head = (fetch_head+1) & (ruu_ifq_size - 1);
-// 	  fetch_num--;
-// 	}
-//     }
+	  /* consume instruction from IFETCH -> DISPATCH queue */
+	  fetch_head = (fetch_head+1) & (ruu_ifq_size - 1);
+	  fetch_num--;
+	}
+    }
 
-//   /* reset IFETCH state */
-//   fetch_num = 0;
-//   fetch_tail = fetch_head = 0;
-//   fetch_pred_PC = fetch_regs_PC = recover_PC;
-// }
+  /* reset IFETCH state */
+  fetch_num = 0;
+  fetch_tail = fetch_head = 0;
+  fetch_pred_PC[tid] = fetch_regs_PC[tid] = recover_PC;
+}
 
 /* initialize the speculative instruction state generator state */
 static void
@@ -3509,18 +3512,18 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 /* floating point register accessors, NOTE: speculative copy on write storage
    provided for fast recovery during wrong path execute (see tracer_recover()
    for details on this process */
-#define FPR_Q(N)		(BITMAP_SET_P(use_spec_F, F_BMAP_SZ, (N))\
+#define FPR_Q(TID, N)		(BITMAP_SET_P(use_spec_F, F_BMAP_SZ, (N))\
 				 ? spec_regs_F.q[(N)]                   \
 				 : regs[TID].regs_F.q[(N)])
-#define SET_FPR_Q(N,EXPR)	(spec_mode				\
+#define SET_FPR_Q(TID, N,EXPR)	(spec_mode				\
 				 ? ((spec_regs_F.q[(N)] = (EXPR)),	\
 				    BITMAP_SET(use_spec_F,F_BMAP_SZ, (N)),\
 				    spec_regs_F.q[(N)])			\
 				 : (regs[TID].regs_F.q[(N)] = (EXPR)))
-#define FPR(N)			(BITMAP_SET_P(use_spec_F, F_BMAP_SZ, (N))\
+#define FPR(TID, N)			(BITMAP_SET_P(use_spec_F, F_BMAP_SZ, (N))\
 				 ? spec_regs_F.d[(N)]			\
 				 : regs[TID].regs_F.d[(N)])
-#define SET_FPR(N,EXPR)		(spec_mode				\
+#define SET_FPR(TID, N,EXPR)		(spec_mode				\
 				 ? ((spec_regs_F.d[(N)] = (EXPR)),	\
 				    BITMAP_SET(use_spec_F,F_BMAP_SZ, (N)),\
 				    spec_regs_F.d[(N)])			\
@@ -3529,23 +3532,23 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 /* miscellanous register accessors, NOTE: speculative copy on write storage
    provided for fast recovery during wrong path execute (see tracer_recover()
    for details on this process */
-#define FPCR			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fpcr*/0)\
+#define FPCR(TID)			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fpcr*/0)\
 				 ? spec_regs_C.fpcr			\
 				 : regs[TID].regs_C.fpcr)
-#define SET_FPCR(EXPR)		(spec_mode				\
+#define SET_FPCR(TID, EXPR)		(spec_mode				\
 				 ? ((spec_regs_C.fpcr = (EXPR)),	\
 				   BITMAP_SET(use_spec_C,C_BMAP_SZ,/*fpcr*/0),\
 				    spec_regs_C.fpcr)			\
 				 : (regs[TID].regs_C.fpcr = (EXPR)))
-#define UNIQ			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*uniq*/1)\
+#define UNIQ(TID)			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*uniq*/1)\
 				 ? spec_regs_C.uniq			\
 				 : regs[TID].regs_C.uniq)
-#define SET_UNIQ(EXPR)		(spec_mode				\
+#define SET_UNIQ(TID, EXPR)		(spec_mode				\
 				 ? ((spec_regs_C.uniq = (EXPR)),	\
 				   BITMAP_SET(use_spec_C,C_BMAP_SZ,/*uniq*/1),\
 				    spec_regs_C.uniq)			\
 				 : (regs[TID].regs_C.uniq = (EXPR)))
-#define FCC			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fcc*/2)\
+#define FCC(TID)			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fcc*/2)\
 				 ? spec_regs_C.fcc			\
 				 : regs[TID].regs_C.fcc)
 #define SET_FCC(EXPR)		(spec_mode				\
@@ -3604,121 +3607,122 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
    sys_syscall(&regs, mem_access, mem, INST, TRUE))
 
 // /* default register state accessor, used by DLite */
-// static char *					/* err str, NULL for no err */
-// simoo_reg_obj(struct regs_t *xregs,		/* registers to access */
-// 	      int is_write,			/* access type */
-// 	      enum md_reg_type rt,		/* reg bank to probe */
-// 	      int reg,				/* register number */
-// 	      struct eval_value_t *val)		/* input, output */
-// {
-//   switch (rt)
-//     {
-//     case rt_gpr:
-//       if (reg < 0 || reg >= MD_NUM_IREGS)
-// 	return "register number out of range";
+static char *					/* err str, NULL for no err */
+simoo_reg_obj(int tid,
+        struct regs_t *xregs,		/* registers to access */
+	      int is_write,			/* access type */
+	      enum md_reg_type rt,		/* reg bank to probe */
+	      int reg,				/* register number */
+	      struct eval_value_t *val)		/* input, output */
+{
+  switch (rt)
+    {
+    case rt_gpr:
+      if (reg < 0 || reg >= MD_NUM_IREGS)
+	return "register number out of range";
 
-//       if (!is_write)
-// 	{
-// 	  val->type = et_uint;
-// 	  val->value.as_uint = GPR(reg);
-// 	}
-//       else
-// 	SET_GPR(reg, eval_as_uint(*val));
-//       break;
+      if (!is_write)
+	{
+	  val->type = et_uint;
+	  val->value.as_uint = GPR(tid, reg);
+	}
+      else
+	SET_GPR(tid, reg, eval_as_uint(*val));
+      break;
 
-//     case rt_lpr:
-//       if (reg < 0 || reg >= MD_NUM_FREGS)
-// 	return "register number out of range";
+    case rt_lpr:
+      if (reg < 0 || reg >= MD_NUM_FREGS)
+	return "register number out of range";
 
-//       /* FIXME: this is not portable... */
-//       abort();
-// #if 0
-//       if (!is_write)
-// 	{
-// 	  val->type = et_uint;
-// 	  val->value.as_uint = FPR_L(reg);
-// 	}
-//       else
-// 	SET_FPR_L(reg, eval_as_uint(*val));
-// #endif
-//       break;
+      /* FIXME: this is not portable... */
+      abort();
+#if 0
+      if (!is_write)
+	{
+	  val->type = et_uint;
+	  val->value.as_uint = FPR_L(reg);
+	}
+      else
+	SET_FPR_L(reg, eval_as_uint(*val));
+#endif
+      break;
 
-//     case rt_fpr:
-//       /* FIXME: this is not portable... */
-//       abort();
-// #if 0
-//       if (!is_write)
-// 	val->value.as_float = FPR_F(reg);
-//       else
-// 	SET_FPR_F(reg, val->value.as_float);
-// #endif
-//       break;
+    case rt_fpr:
+      /* FIXME: this is not portable... */
+      abort();
+#if 0
+      if (!is_write)
+	val->value.as_float = FPR_F(reg);
+      else
+	SET_FPR_F(reg, val->value.as_float);
+#endif
+      break;
 
-//     case rt_dpr:
-//       /* FIXME: this is not portable... */
-//       abort();
-// #if 0
-//       /* 1/2 as many regs in this mode */
-//       if (reg < 0 || reg >= MD_NUM_REGS/2)
-// 	return "register number out of range";
+    case rt_dpr:
+      /* FIXME: this is not portable... */
+      abort();
+#if 0
+      /* 1/2 as many regs in this mode */
+      if (reg < 0 || reg >= MD_NUM_REGS/2)
+	return "register number out of range";
 
-//       if (at == at_read)
-// 	val->as_double = FPR_D(reg * 2);
-//       else
-// 	SET_FPR_D(reg * 2, val->as_double);
-// #endif
-//       break;
+      if (at == at_read)
+	val->as_double = FPR_D(reg * 2);
+      else
+	SET_FPR_D(reg * 2, val->as_double);
+#endif
+      break;
 
-//       /* FIXME: this is not portable... */
-// #if 0
-//       abort();
-//     case rt_hi:
-//       if (at == at_read)
-// 	val->as_word = HI;
-//       else
-// 	SET_HI(val->as_word);
-//       break;
-//     case rt_lo:
-//       if (at == at_read)
-// 	val->as_word = LO;
-//       else
-// 	SET_LO(val->as_word);
-//       break;
-//     case rt_FCC:
-//       if (at == at_read)
-// 	val->as_condition = FCC;
-//       else
-// 	SET_FCC(val->as_condition);
-//       break;
-// #endif
+      /* FIXME: this is not portable... */
+#if 0
+      abort();
+    case rt_hi:
+      if (at == at_read)
+	val->as_word = HI;
+      else
+	SET_HI(val->as_word);
+      break;
+    case rt_lo:
+      if (at == at_read)
+	val->as_word = LO;
+      else
+	SET_LO(val->as_word);
+      break;
+    case rt_FCC:
+      if (at == at_read)
+	val->as_condition = FCC;
+      else
+	SET_FCC(val->as_condition);
+      break;
+#endif
 
-//     case rt_PC:
-//       if (!is_write)
-// 	{
-// 	  val->type = et_addr;
-// 	  val->value.as_addr = regs.regs_PC;
-// 	}
-//       else
-// 	regs.regs_PC = eval_as_addr(*val);
-//       break;
+    case rt_PC:
+      if (!is_write)
+	{
+	  val->type = et_addr;
+	  val->value.as_addr = regs[tid].regs_PC;
+	}
+      else
+	regs[tid].regs_PC = eval_as_addr(*val);
+      break;
 
-//     case rt_NPC:
-//       if (!is_write)
-// 	{
-// 	  val->type = et_addr;
-// 	  val->value.as_addr = regs.regs_NPC;
-// 	}
-//       else
-// 	regs.regs_NPC = eval_as_addr(*val);
-//       break;
+    case rt_NPC:
+      if (!is_write)
+	{
+	  val->type = et_addr;
+	  val->value.as_addr = regs[tid].regs_NPC;
+	}
+      else
+	regs[tid].regs_NPC = eval_as_addr(*val);
+      break;
 
-//     default:
-//       panic("bogus register bank");
-//     }
+    default:
+      panic("bogus register bank");
+    }
 
-//   /* no error */
-//   return NULL;
-// }
+  /* no error */
+  return NULL;
+}
 
 /* the last operation that ruu_dispatch() attempted to dispatch, for
    implementing in-order issue */
@@ -4152,19 +4156,25 @@ ruu_dispatch(void)
 
       /* check for DLite debugger entry condition */
       made_check = TRUE;
+      current_dlite_tid = fetch_last_thread;
       if (dlite_check_break(pred_PC,
 			    is_write ? ACCESS_WRITE : ACCESS_READ,
-			    addr, sim_num_insn, sim_cycle))
-	dlite_main(regs[tid].regs_PC, pred_PC, sim_cycle, &regs, mem);
+			    addr, sim_num_insn, sim_cycle)) {
+	        dlite_main(regs[tid].regs_PC, pred_PC, sim_cycle, &regs[tid], mem[tid]);
+
+          }
     }
 
   /* need to enter DLite at least once per cycle */
   if (!made_check)
     {
+        current_dlite_tid = fetch_last_thread;
       if (dlite_check_break(/* no next PC */0,
 			    is_write ? ACCESS_WRITE : ACCESS_READ,
-			    addr, sim_num_insn, sim_cycle))
-	dlite_main(regs[tid].regs_PC, /* no next PC */0, sim_cycle, &regs, mem);
+			    addr, sim_num_insn, sim_cycle)) {
+          dlite_main(regs[tid].regs_PC, /* no next PC */0, sim_cycle, &regs[tid], mem[tid]);
+
+          }
     }
 }
 
@@ -4434,7 +4444,10 @@ simoo_mstate_obj(FILE *stream,			/* output stream */
   else if (!strcmp(cmd, "cv"))
     {
       /* dump event queue contents */
-      cv_dump(stream);
+      for (int index = 0; index < thread_num; index++) {
+        fprintf(stream, "** create vector state - thread %n **\n", index);
+        cv_dump(index, stream);
+      }
     }
   else if (!strcmp(cmd, "rspec"))
     {
@@ -4471,11 +4484,13 @@ sim_main(void)
   /* set up program entry state */
     regs[index].regs_PC = ld_prog_entry;
     regs[index].regs_NPC = regs[index].regs_PC + sizeof(md_inst_t);
+    /* check for DLite debugger entry condition */
+      current_dlite_tid = index;
+    if (dlite_check_break(regs[index].regs_PC, /* no access */0, /* addr */0, 0, 0)) {
+      dlite_main(regs[index].regs_PC, regs[index].regs_PC + sizeof(md_inst_t),
+          sim_cycle, &regs[index], mem[index]);
+    }
   }
-  /* check for DLite debugger entry condition */
-  if (dlite_check_break(regs[0].regs_PC, /* no access */0, /* addr */0, 0, 0))
-    dlite_main(regs[0].regs_PC, regs[0].regs_PC + sizeof(md_inst_t),
-	       sim_cycle, &regs, mem);
   fetch_last_thread = 0;
   fetch_cnt = 0;
   fetch_max = ruu_ifq_size / thread_num;
@@ -4526,7 +4541,7 @@ sim_main(void)
 	    {
 #define DEFINST(OP,MSK,NAME,OPFORM,RES,FLAGS,O1,O2,I1,I2,I3)		\
 	    case OP:							\
-	      SYMCAT(OP,_IMPL(tid));						\
+	      SYMCAT(OP,_IMPL(fetch_last_thread));						\
 	      break;
 #define DEFLINK(OP,MSK,NAME,MASK,SHIFT)					\
 	    case OP:							\
@@ -4551,10 +4566,13 @@ sim_main(void)
 	    }
 
 	  /* check for DLite debugger entry condition */
+          current_dlite_tid = fetch_last_thread;
 	  if (dlite_check_break(regs[fetch_last_thread].regs_NPC,
 				is_write ? ACCESS_WRITE : ACCESS_READ,
-				addr, sim_num_insn, sim_num_insn))
-	    dlite_main(regs[fetch_last_thread].regs_PC, regs[fetch_last_thread].regs_NPC, sim_num_insn, &regs, mem);
+				addr, sim_num_insn, sim_num_insn)) {
+	    dlite_main(regs[fetch_last_thread].regs_PC, regs[fetch_last_thread].regs_NPC, sim_num_insn, &regs[fetch_last_thread], mem[fetch_last_thread]);
+
+        }
 
 	  /* go to the next instruction */
 	  regs[fetch_last_thread].regs_PC = regs[fetch_last_thread].regs_NPC;
@@ -4586,7 +4604,7 @@ sim_main(void)
 	panic("LSQ_head/LSQ_tail wedged");
 
       /* check if pipetracing is still active */
-      ptrace_check_active(regs[0].regs_PC, sim_num_insn, sim_cycle);
+      ptrace_check_active(fetch_regs_PC[fetch_last_thread], sim_num_insn, sim_cycle);
 
       /* indicate new cycle in pipetrace */
       ptrace_newcycle(sim_cycle);

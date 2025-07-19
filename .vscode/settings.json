@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "dlite.h": "c",
-        "*.def": "c"
+        "*.def": "c",
+        "stdio.h": "c"
     }
 }

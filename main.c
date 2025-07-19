@@ -396,7 +396,7 @@ main(int argc, char **argv, char **envp)
 
   /* initialize architected state */
   for (int index = 0; index < thread_num; index++) {
-    sim_load_prog_smt(argv[exec_start[index]], exec_end[index] - exec_start[index],
+    sim_load_prog_smt(index, argv[exec_start[index]], exec_end[index] - exec_start[index],
         argv + exec_start[index], index, envp);
   }
 

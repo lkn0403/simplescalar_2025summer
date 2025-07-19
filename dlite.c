@@ -71,9 +71,11 @@
 #include "dlite.h"
 
 /* architected state accessors, initialized by dlite_init() */
-static dlite_reg_obj_t f_dlite_reg_obj = NULL;
-static dlite_mem_obj_t f_dlite_mem_obj = NULL;
-static dlite_mstate_obj_t f_dlite_mstate_obj = NULL;
+static dlite_reg_obj_t f_dlite_reg_obj[MAX_THREAD];
+static dlite_mem_obj_t f_dlite_mem_obj[MAX_THREAD];
+static dlite_mstate_obj_t f_dlite_mstate_obj[MAX_THREAD];
+
+unsigned int current_dlite_tid;
 
 /* set non-zero to enter DLite after next instruction */
 int dlite_active = FALSE;
@@ -204,7 +206,7 @@ ident_evaluator(struct eval_state_t *es)	/* expression evaluator */
       if (!mystricmp(es->tok_buf, md_reg_names[i].str))
 	{
 	  err_str =
-	    f_dlite_reg_obj(local_regs, /* !is_write */FALSE,
+	    f_dlite_reg_obj[current_dlite_tid](local_regs, /* !is_write */FALSE,
 			    md_reg_names[i].file, md_reg_names[i].reg, &val);
 	  if (err_str)
 	    {
@@ -1089,7 +1091,7 @@ dlite_cont(int nargs, union arg_val_t args[],	/* command arguments */
       /* reset PC */
       val.type = et_addr;
       val.value.as_addr = eval_as_addr(args[0].as_value);
-      f_dlite_reg_obj(regs, /* is_write */TRUE, rt_PC, 0, &val);
+      f_dlite_reg_obj[current_dlite_tid](regs, /* is_write */TRUE, rt_PC, 0, &val);
 
       myfprintf(stdout, "DLite: continuing execution @ 0x%08p...\n",
 		val.value.as_addr);
@@ -1354,13 +1356,13 @@ dlite_mstate(int nargs, union arg_val_t args[],	/* command arguments */
     {
       if (nargs == 0)
 	{
-	  errstr = f_dlite_mstate_obj(stdout, NULL, regs, mem);
+	  errstr = f_dlite_mstate_obj[current_dlite_tid](stdout, NULL, regs, mem);
 	  if (errstr)
 	    return errstr;
 	}
       else
 	{
-	  errstr = f_dlite_mstate_obj(stdout, args[0].as_str, regs, mem);
+	  errstr = f_dlite_mstate_obj[current_dlite_tid](stdout, args[0].as_str, regs, mem);
 	  if (errstr)
 	    return errstr;
 	}
@@ -1420,7 +1422,7 @@ dlite_display(int nargs, union arg_val_t args[],/* command arguments */
     size = 4;
 
   /* read memory */
-  errstr = f_dlite_mem_obj(mem, /* !is_write */FALSE, addr, (char *)buf, size);
+  errstr = f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE, addr, (char *)buf, size);
   if (errstr)
     return errstr;
 
@@ -1528,7 +1530,7 @@ dlite_dump(int nargs, union arg_val_t args[],	/* command arguments */
       for (i=0; i < count; i++)
 	{
 	  errstr =
-	    f_dlite_mem_obj(mem, /* !is_write */FALSE,
+	    f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
 			    i_addr, (char *)&byte, 1);
 	  if (errstr)
 	    return errstr;
@@ -1559,7 +1561,7 @@ dlite_dump(int nargs, union arg_val_t args[],	/* command arguments */
 	      if (i_addr >= addr && i_count <= count)
 		{
 		  errstr =
-		    f_dlite_mem_obj(mem, /* !is_write */FALSE,
+		    f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
 				    i_addr, (char *)&byte, 1);
 		  if (errstr)
 		    return errstr;
@@ -1646,7 +1648,7 @@ dlite_dis(int nargs, union arg_val_t args[],	/* command arguments */
       /* read and disassemble instruction */
       myfprintf(stdout, "    0x%08p:   ", addr);
       errstr =
-	f_dlite_mem_obj(mem, /* !is_write */FALSE,
+	f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
 			addr, (char *)&inst, sizeof(inst));
       inst = MD_SWAPI(inst);
       if (errstr)
@@ -2163,22 +2165,25 @@ dlite_symbol(int nargs, union arg_val_t args[],	/* command arguments */
 
 /* initialize the DLite debugger */
 void
-dlite_init(dlite_reg_obj_t reg_obj,		/* register state object */
+dlite_init( int tid, 
+     dlite_reg_obj_t reg_obj,		/* register state object */
 	   dlite_mem_obj_t mem_obj,		/* memory state object */
 	   dlite_mstate_obj_t mstate_obj)	/* machine state object */
 {
   /* architected state accessors */
-  f_dlite_reg_obj = reg_obj;
-  f_dlite_mem_obj = mem_obj;
-  f_dlite_mstate_obj = mstate_obj;
+  f_dlite_reg_obj[tid] = reg_obj;
+  f_dlite_mem_obj[tid] = mem_obj;
+  f_dlite_mstate_obj[tid] = mstate_obj;
 
   /* instantiate the expression evaluator */
+  if (!tid)
   dlite_evaluator = eval_new(ident_evaluator, NULL);
 }
 
 /* print a mini-state header */
 static void
-dlite_status(md_addr_t regs_PC,			/* PC of just completed inst */
+dlite_status(
+       md_addr_t regs_PC,			/* PC of just completed inst */
 	     md_addr_t next_PC,			/* PC of next inst to exec */
 	     counter_t cycle,			/* current cycle */
 	     int dbreak,			/* last break a data break? */
@@ -2194,7 +2199,7 @@ dlite_status(md_addr_t regs_PC,			/* PC of just completed inst */
       fprintf(stdout, "Instruction (now finished) that caused data break:\n");
       myfprintf(stdout, "[%10n] 0x%08p:    ", cycle, regs_PC);
       errstr =
-	f_dlite_mem_obj(mem, /* !is_write */FALSE,
+	f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
 			regs_PC, (char *)&inst, sizeof(inst));
       inst = MD_SWAPI(inst);
       if (errstr)
@@ -2208,7 +2213,7 @@ dlite_status(md_addr_t regs_PC,			/* PC of just completed inst */
   /* read and disassemble instruction */
   myfprintf(stdout, "[%10n] 0x%08p:    ", cycle, next_PC);
   errstr =
-    f_dlite_mem_obj(mem, /* !is_write */FALSE,
+    f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
 		    next_PC, (char *)&inst, sizeof(inst));
   inst = MD_SWAPI(inst);
   if (errstr)

@@ -146,7 +146,8 @@ typedef char *					/* error str, NULL if none */
 
 /* initialize the DLite debugger */
 void
-dlite_init(dlite_reg_obj_t reg_obj,		/* register state object */
+dlite_init( int tid, 
+       dlite_reg_obj_t reg_obj,		/* register state object */
 	   dlite_mem_obj_t mem_obj,		/* memory state object */
 	   dlite_mstate_obj_t mstate_obj);	/* machine state object */
 
