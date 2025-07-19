@@ -99,7 +99,7 @@
  *		  unused fields:
  *		    DGPR(N)   - general purpose register N
  *		    DGPR_D(N) - double word general purpose register N
- *		    DCGPR(N)  - general purpose register conditional on
+ *		    DCGPR(TID, N)  - general purpose register conditional on
  *			        pre/post- increment/decrement mode
  *		    DFPR_L(N) - floating-point register N, as word
  *		    DFPR_F(N) - floating-point reg N, as single-prec float
@@ -107,7 +107,7 @@
  *		    DHI	      - HI result register
  *		    DLO	      - LO result register
  *		    DFCC      - floating point condition codes
- *		    DCPC      - current PC
+ *		    DCPC(TID)      - current PC
  *		    DNPC      - next PC
  *		    DNA	      - no dependence
  *
@@ -119,7 +119,7 @@
  *   <expr>	- a C expression that implements the instruction being
  * 		  defined, the expression must modify all architected state
  *		  affected by the instruction's execution, by default, the
- *		  next PC (NPC) value defaults to the current PC (CPC) plus
+ *		  next PC (NPC) value defaults to the current PC (CPC(TID)) plus
  *		  SS_INST_SIZE, as a result, only taken branches need to set
  *		  NPC
  *
@@ -146,8 +146,8 @@
  *		  storage format), all architected register and memory state
  *		  is accessed through the following macros:
  *
- *		    GPR(N)         - read general purpose register N
- *		    SET_GPR(N,E)   - write general purpose register N with E
+ *		    GPR(TID, N)         - read general purpose register N
+ *		    SET_GPR(TID, N,E)   - write general purpose register N with E
  *		    GPR_D(N)       - read double word general purpose reg N
  *		    SET_GPR_D(N,E) - write double word gen purpose reg N w/ E
  *		    FPR_L(N)       - read floating-point register N, as word
@@ -162,9 +162,9 @@
  *		    SET_LO(E)      - write LO result register with E
  *		    FCC	           - read floating point condition codes
  *		    SET_FCC(E)     - write floating point condition codes w/ E
- *		    CPC	           - read current PC register
+ *		    CPC(TID)	           - read current PC register
  *		    NPC	           - read next PC register
- *		    SET_NPC(E)     - write next PC register with E
+ *		    SET_NPC(TID,E)     - write next PC register with E
  *		    TPC	           - read target PC register
  *		    SET_TPC(E)     - write target PC register with E
  *
@@ -201,7 +201,7 @@ DEFLINK(CALL_PAL, 0x00, "call_pal", 0, 0xff)
 
 #define LDA_IMPL							\
   {									\
-    SET_GPR(RA, GPR(RB) + SEXT(OFS));					\
+    SET_GPR(TID, RA, GPR(TID, RB) + SEXT(OFS));					\
   }
 DEFINST(LDA,			0x08,
 	"lda",			"a,o(b)",
@@ -210,7 +210,7 @@ DEFINST(LDA,			0x08,
 
 #define LDAH_IMPL							\
   {									\
-    SET_GPR(RA, GPR(RB) + SEXT32(65536 * OFS));				\
+    SET_GPR(TID, RA, GPR(TID, RB) + SEXT32(65536 * OFS));				\
   }
 DEFINST(LDAH,			0x09,
 	"ldah",			"a,o(b)",
@@ -223,11 +223,11 @@ DEFINST(LDAH,			0x09,
     byte_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_BYTE(GPR(RB) + SEXT(OFS), _fault);			\
+    _result = READ_BYTE(GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
-    SET_GPR(RA, (qword_t)_result);					\
+    SET_GPR(TID, RA, (qword_t)_result);					\
   }
 DEFINST(LDBU,			0x0a,
 	"ldbu",			"a,o(b)",
@@ -239,11 +239,11 @@ DEFINST(LDBU,			0x0a,
     qword_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_QWORD((GPR(RB) + SEXT(OFS)) & ~7, _fault);		\
+    _result = READ_QWORD((GPR(TID, RB) + SEXT(OFS)) & ~7, _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
-    SET_GPR(RA, _result);						\
+    SET_GPR(TID, RA, _result);						\
   }
 DEFINST(LDQ_U,			0x0b,
 	"ldq_u",		"a,o(b)",
@@ -256,11 +256,11 @@ DEFINST(LDQ_U,			0x0b,
     half_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_HALF(GPR(RB) + SEXT(OFS), _fault);			\
+    _result = READ_HALF(GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
-    SET_GPR(RA, (qword_t)_result);					\
+    SET_GPR(TID, RA, (qword_t)_result);					\
   }
 DEFINST(LDWU,			0x0c,
 	"ldwu",			"a,o(b)",
@@ -272,7 +272,7 @@ DEFINST(LDWU,			0x0c,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_HALF((half_t)GPR(RA), GPR(RB) + SEXT(OFS), _fault);		\
+    WRITE_HALF((half_t)GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -286,7 +286,7 @@ DEFINST(STW,			0x0d,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_BYTE((byte_t)GPR(RA), GPR(RB) + SEXT(OFS), _fault);		\
+    WRITE_BYTE((byte_t)GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -299,7 +299,7 @@ DEFINST(STB,			0x0e,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_QWORD(GPR(RA), (GPR(RB) + SEXT(OFS)) & ~7, _fault);		\
+    WRITE_QWORD(GPR(TID, RA), (GPR(TID, RB) + SEXT(OFS)) & ~7, _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -370,7 +370,7 @@ DEFINST(LDG,			0x21,
     sqword_t _longhold, _e1, _e2;					\
     enum md_fault_type _fault;						\
 									\
-    _longhold = READ_WORD(GPR(RB) + SEXT(OFS), _fault);			\
+    _longhold = READ_WORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -403,7 +403,7 @@ DEFINST(LDS,			0x22,
     qword_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_QWORD(GPR(RB) + SEXT(OFS), _fault);			\
+    _result = READ_QWORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -443,7 +443,7 @@ DEFINST(STG,			0x25,
     _longhold = FPR_Q(RA);						\
     _inthold = (((_longhold >> 32) & ULL(0xc0000000))			\
 		| ((_longhold >> 29) & ULL(0x3fffffff)));		\
-    WRITE_WORD(_inthold, GPR(RB) + SEXT(OFS), _fault);			\
+    WRITE_WORD(_inthold, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -456,7 +456,7 @@ DEFINST(STS,			0x26,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_QWORD(FPR_Q(RA), GPR(RB) + SEXT(OFS), _fault);		\
+    WRITE_QWORD(FPR_Q(RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -470,11 +470,11 @@ DEFINST(STT,			0x27,
     word_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_WORD(GPR(RB) + SEXT(OFS), _fault);			\
+    _result = READ_WORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
-    SET_GPR(RA, (sqword_t)((sword_t)_result));				\
+    SET_GPR(TID, RA, (sqword_t)((sword_t)_result));				\
   }
 DEFINST(LDL,			0x28,
 	"ldl",			"a,o(b)",
@@ -486,11 +486,11 @@ DEFINST(LDL,			0x28,
     qword_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_QWORD(GPR(RB) + SEXT(OFS), _fault);			\
+    _result = READ_QWORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
-    SET_GPR(RA, _result);						\
+    SET_GPR(TID, RA, _result);						\
   }
 DEFINST(LDQ,			0x29,
 	"ldq",			"a,o(b)",
@@ -503,11 +503,11 @@ DEFINST(LDQ,			0x29,
     word_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_WORD(GPR(RB) + SEXT(OFS), _fault);			\
+    _result = READ_WORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
-    SET_GPR(RA, (sqword_t)((sword_t)_result));				\
+    SET_GPR(TID, RA, (sqword_t)((sword_t)_result));				\
   }
 DEFINST(LDL_L,			0x2a,
 	"ldl_l (unimpl)",	"a,o(b)",
@@ -520,11 +520,11 @@ DEFINST(LDL_L,			0x2a,
     qword_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_QWORD(GPR(RB) + SEXT(OFS), _fault);			\
+    _result = READ_QWORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
-    SET_GPR(RA, _result);						\
+    SET_GPR(TID, RA, _result);						\
   }
 DEFINST(LDQ_L,			0x2b,
 	"ldq_l (unimpl)",	"a,o(b)",
@@ -536,8 +536,8 @@ DEFINST(LDQ_L,			0x2b,
     word_t _src;							\
     enum md_fault_type _fault;						\
 									\
-    _src = (word_t)(GPR(RA) & ULL(0xffffffff));				\
-    WRITE_WORD(_src, GPR(RB) + SEXT(OFS), _fault);			\
+    _src = (word_t)(GPR(TID, RA) & ULL(0xffffffff));				\
+    WRITE_WORD(_src, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -550,7 +550,7 @@ DEFINST(STL,			0x2c,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_QWORD(GPR(RA), GPR(RB) + SEXT(OFS), _fault);			\
+    WRITE_QWORD(GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -565,8 +565,8 @@ DEFINST(STQ,			0x2d,
     word_t _src;							\
     enum md_fault_type _fault;						\
 									\
-    _src = (word_t)(GPR(RA) & ULL(0xffffffff));				\
-    WRITE_WORD(_src, GPR(RB) + SEXT(OFS), _fault);			\
+    _src = (word_t)(GPR(TID, RA) & ULL(0xffffffff));				\
+    WRITE_WORD(_src, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -580,7 +580,7 @@ DEFINST(STL_C,			0x2e,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_QWORD(GPR(RA), GPR(RB) + SEXT(OFS), _fault);			\
+    WRITE_QWORD(GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -591,9 +591,9 @@ DEFINST(STQ_C,			0x2f,
 
 #define BR_IMPL								\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    SET_GPR(RA, CPC + 4);						\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    SET_NPC(TID, CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    SET_GPR(TID, RA, CPC(TID) + 4);						\
   }
 DEFINST(BR,			0x30,
 	"br",			"a,J",
@@ -602,9 +602,9 @@ DEFINST(BR,			0x30,
 
 #define FBEQ_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
     if (FPR(RA) == 0.0)							\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(FBEQ,			0x31,
 	"fbeq",			"A,j",
@@ -613,9 +613,9 @@ DEFINST(FBEQ,			0x31,
 
 #define FBLT_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
     if (FPR(RA) < 0.0)							\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(FBLT,			0x32,
 	"fblt",			"A,j",
@@ -624,9 +624,9 @@ DEFINST(FBLT,			0x32,
 
 #define FBLE_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
     if (FPR(RA) <= 0.0)							\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(FBLE,			0x33,
 	"fble",			"A,j",
@@ -637,9 +637,9 @@ DEFINST(FBLE,			0x33,
    off the predictor to use the return address stack... */
 #define BSR_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    SET_GPR(RA, CPC + 4);						\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    SET_GPR(TID, RA, CPC(TID) + 4);						\
   }
 DEFINST(BSR,			0x34,
 	"bsr",			"a,J",
@@ -648,9 +648,9 @@ DEFINST(BSR,			0x34,
 
 #define FBNE_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
     if (FPR(RA) != 0.0)							\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(FBNE,			0x35,
 	"fbne",			"A,j",
@@ -659,9 +659,9 @@ DEFINST(FBNE,			0x35,
 
 #define FBGE_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
     if (FPR(RA) >= 0.0)							\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(FBGE,			0x36,
 	"fbge",			"A,j",
@@ -670,9 +670,9 @@ DEFINST(FBGE,			0x36,
 
 #define FBGT_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
     if (FPR(RA) > 0.0)							\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(FBGT,			0x37,
 	"fbgt",			"A,j",
@@ -681,9 +681,9 @@ DEFINST(FBGT,			0x37,
 
 #define BLBC_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    if (!(GPR(RA) & 1))							\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    if (!(GPR(TID, RA) & 1))							\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(BLBC,			0x38,
 	"blbc",			"a,j",
@@ -692,9 +692,9 @@ DEFINST(BLBC,			0x38,
 
 #define BEQ_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    if (GPR(RA) == ULL(0))						\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    if (GPR(TID, RA) == ULL(0))						\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(BEQ,			0x39,
 	"beq",			"a,j",
@@ -703,9 +703,9 @@ DEFINST(BEQ,			0x39,
 
 #define BLT_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    if ((sqword_t)GPR(RA) < LL(0))					\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    if ((sqword_t)GPR(TID, RA) < LL(0))					\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(BLT,			0x3a,
 	"blt",			"a,j",
@@ -714,9 +714,9 @@ DEFINST(BLT,			0x3a,
 
 #define BLE_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    if ((sqword_t)GPR(RA) <= LL(0))					\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    if ((sqword_t)GPR(TID, RA) <= LL(0))					\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(BLE,			0x3b,
 	"ble",			"a,j",
@@ -725,9 +725,9 @@ DEFINST(BLE,			0x3b,
 
 #define BLBS_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    if (GPR(RA) & 1)							\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    if (GPR(TID, RA) & 1)							\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(BLBS,			0x3c,
 	"blbs",			"a,j",
@@ -736,9 +736,9 @@ DEFINST(BLBS,			0x3c,
 
 #define BNE_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    if (GPR(RA) != ULL(0))						\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    if (GPR(TID, RA) != ULL(0))						\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(BNE,			0x3d,
 	"bne",			"a,j",
@@ -747,9 +747,9 @@ DEFINST(BNE,			0x3d,
 
 #define BGE_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    if ((sqword_t)GPR(RA) >= LL(0))					\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    if ((sqword_t)GPR(TID, RA) >= LL(0))					\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(BGE,			0x3e,
 	"bge",			"a,j",
@@ -758,9 +758,9 @@ DEFINST(BGE,			0x3e,
 
 #define BGT_IMPL							\
   {									\
-    SET_TPC(CPC + (SEXT21(TARG) << 2) + 4);				\
-    if ((sqword_t)GPR(RA) > LL(0))					\
-      SET_NPC(CPC + (SEXT21(TARG) << 2) + 4);				\
+    SET_TPC(CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
+    if ((sqword_t)GPR(TID, RA) > LL(0))					\
+      SET_NPC(TID,CPC(TID) + (SEXT21(TARG) << 2) + 4);				\
   }
 DEFINST(BGT,			0x3f,
 	"bgt",			"a,j",
@@ -781,7 +781,7 @@ DEFINST(PAL_CALLSYS,		0x83,
 
 #define PAL_RDUNIQ_IMPL							\
   {									\
-    SET_GPR(/* v0 */0, UNIQ);						\
+    SET_GPR(TID, /* v0 */0, UNIQ);						\
   }
 DEFINST(PAL_RDUNIQ,		0x9e,
 	"call_pal rduniq",	"",
@@ -790,7 +790,7 @@ DEFINST(PAL_RDUNIQ,		0x9e,
 
 #define PAL_WRUNIQ_IMPL							\
   {									\
-    SET_UNIQ(GPR(/* a0 */16));						\
+    SET_UNIQ(GPR(TID, /* a0 */16));						\
   }
 DEFINST(PAL_WRUNIQ,		0x9f,
 	"call_pal wruniq",	"",
@@ -849,7 +849,7 @@ CONNECT(ADDL_LINK)
 
 #define ADDL_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32((GPR(RA) + GPR(RB)) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) + GPR(TID, RB)) & ULL(0xffffffff)));		\
   }
 DEFINST(ADDL,			0x00,
 	"addl",			"a,b,c",
@@ -858,7 +858,7 @@ DEFINST(ADDL,			0x00,
 
 #define ADDLI_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32((GPR(RA) + IMM) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) + IMM) & ULL(0xffffffff)));		\
   }
 DEFINST(ADDLI,			0x01,
 	"addl",			"a,i,c",
@@ -870,7 +870,7 @@ CONNECT(S4ADDL_LINK)
 
 #define S4ADDL_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32(((GPR(RA) << 2) + GPR(RB)) & ULL(0xffffffff)));	\
+    SET_GPR(TID, RC, SEXT32(((GPR(TID, RA) << 2) + GPR(TID, RB)) & ULL(0xffffffff)));	\
   }
 DEFINST(S4ADDL,			0x00,
 	"s4addl",		"a,b,c",
@@ -879,7 +879,7 @@ DEFINST(S4ADDL,			0x00,
 
 #define S4ADDLI_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32(((GPR(RA) << 2) + IMM) & ULL(0xffffffff)));	\
+    SET_GPR(TID, RC, SEXT32(((GPR(TID, RA) << 2) + IMM) & ULL(0xffffffff)));	\
   }
 DEFINST(S4ADDLI,		0x01,
 	"s4addl",		"a,i,c",
@@ -891,7 +891,7 @@ CONNECT(SUBL_LINK)
 
 #define SUBL_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32((GPR(RA) - GPR(RB)) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) - GPR(TID, RB)) & ULL(0xffffffff)));		\
   }
 DEFINST(SUBL,			0x00,
 	"subl",			"a,b,c",
@@ -900,7 +900,7 @@ DEFINST(SUBL,			0x00,
 
 #define SUBLI_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32((GPR(RA) - IMM) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) - IMM) & ULL(0xffffffff)));		\
   }
 DEFINST(SUBLI,			0x01,
 	"subl",			"a,i,c",
@@ -912,7 +912,7 @@ CONNECT(S4SUBL_LINK)
 
 #define S4SUBL_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32(((GPR(RA) << 2) - GPR(RB)) & ULL(0xffffffff)));	\
+    SET_GPR(TID, RC, SEXT32(((GPR(TID, RA) << 2) - GPR(TID, RB)) & ULL(0xffffffff)));	\
   }
 DEFINST(S4SUBL,			0x00,
 	"s4subl",		"a,b,c",
@@ -921,7 +921,7 @@ DEFINST(S4SUBL,			0x00,
 
 #define S4SUBLI_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32(((GPR(RA) << 2) - IMM) & ULL(0xffffffff)));	\
+    SET_GPR(TID, RC, SEXT32(((GPR(TID, RA) << 2) - IMM) & ULL(0xffffffff)));	\
   }
 DEFINST(S4SUBLI,		0x01,
 	"s4subl",		"a,i,c",
@@ -936,14 +936,14 @@ CONNECT(CMPBGE_LINK)
     int _i;								\
     qword_t _rav, _rbv;							\
 									\
-    _rav = GPR(RA);							\
-    _rbv = GPR(RB);							\
-    SET_GPR(RC, 0);							\
+    _rav = GPR(TID, RA);							\
+    _rbv = GPR(TID, RB);							\
+    SET_GPR(TID, RC, 0);							\
 									\
     for (_i = 56; _i >= 0; _i -= 8)					\
       {									\
-	SET_GPR(RC, GPR(RC) << 1);					\
-	SET_GPR(RC, (GPR(RC)						\
+	SET_GPR(TID, RC, GPR(TID, RC) << 1);					\
+	SET_GPR(TID, RC, (GPR(TID, RC)						\
 		     | ((_rav >> _i & (sqword_t)0xff) >=		\
 			(_rbv >> _i & (sqword_t)0xff))));		\
       }									\
@@ -958,14 +958,14 @@ DEFINST(CMPBGE,			0x00,
     int _i;								\
     qword_t _rav, _rbv;							\
 									\
-    _rav = GPR(RA);							\
+    _rav = GPR(TID, RA);							\
     _rbv = IMM;								\
-    SET_GPR(RC, 0);							\
+    SET_GPR(TID, RC, 0);							\
 									\
     for (_i = 56; _i >= 0; _i -= 8)					\
       {									\
-	SET_GPR(RC, GPR(RC) << 1);					\
-	SET_GPR(RC, (GPR(RC)						\
+	SET_GPR(TID, RC, GPR(TID, RC) << 1);					\
+	SET_GPR(TID, RC, (GPR(TID, RC)						\
 		     | ((_rav >> _i & (sqword_t)0xff) >=		\
 			(_rbv >> _i & (sqword_t)0xff))));		\
       }									\
@@ -980,7 +980,7 @@ CONNECT(S8ADDL_LINK)
 
 #define S8ADDL_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32(((GPR(RA) << 3) + GPR(RB)) & ULL(0xffffffff)));	\
+    SET_GPR(TID, RC, SEXT32(((GPR(TID, RA) << 3) + GPR(TID, RB)) & ULL(0xffffffff)));	\
   }
 DEFINST(S8ADDL,			0x00,
 	"s8addl",		"a,b,c",
@@ -989,7 +989,7 @@ DEFINST(S8ADDL,			0x00,
 	
 #define S8ADDLI_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32(((GPR(RA) << 3) + IMM) & ULL(0xffffffff)));	\
+    SET_GPR(TID, RC, SEXT32(((GPR(TID, RA) << 3) + IMM) & ULL(0xffffffff)));	\
   }
 DEFINST(S8ADDLI,		0x01,
 	"s8addl",		"a,i,c",
@@ -1001,7 +1001,7 @@ CONNECT(S8SUBL_LINK)
 
 #define S8SUBL_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32(((GPR(RA) << 3) - GPR(RB)) & ULL(0xffffffff)));	\
+    SET_GPR(TID, RC, SEXT32(((GPR(TID, RA) << 3) - GPR(TID, RB)) & ULL(0xffffffff)));	\
   }
 DEFINST(S8SUBL,			0x00,
 	"s8subl",		"a,b,c",
@@ -1010,7 +1010,7 @@ DEFINST(S8SUBL,			0x00,
 	
 #define S8SUBLI_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32(((GPR(RA) << 3) - IMM) & ULL(0xffffffff)));	\
+    SET_GPR(TID, RC, SEXT32(((GPR(TID, RA) << 3) - IMM) & ULL(0xffffffff)));	\
   }
 DEFINST(S8SUBLI,		0x01,
 	"s8subl",		"a,i,c",
@@ -1022,7 +1022,7 @@ CONNECT(CMPULT_LINK)
 
 #define CMPULT_IMPL							\
   {									\
-    SET_GPR(RC, (qword_t)GPR(RA) < (qword_t)GPR(RB));			\
+    SET_GPR(TID, RC, (qword_t)GPR(TID, RA) < (qword_t)GPR(TID, RB));			\
   }
 DEFINST(CMPULT,			0x00,
 	"cmpult",		"a,b,c",
@@ -1031,7 +1031,7 @@ DEFINST(CMPULT,			0x00,
 
 #define CMPULTI_IMPL							\
   {									\
-    SET_GPR(RC, (qword_t)GPR(RA) < (qword_t)IMM);			\
+    SET_GPR(TID, RC, (qword_t)GPR(TID, RA) < (qword_t)IMM);			\
   }
 DEFINST(CMPULTI,		0x01,
 	"cmpult",		"a,i,c",
@@ -1043,7 +1043,7 @@ CONNECT(ADDQ_LINK)
 
 #define ADDQ_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) + GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) + GPR(TID, RB));					\
   }
 DEFINST(ADDQ,			0x00,
 	"addq",			"a,b,c",
@@ -1052,7 +1052,7 @@ DEFINST(ADDQ,			0x00,
 	
 #define ADDQI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) + IMM);						\
+    SET_GPR(TID, RC, GPR(TID, RA) + IMM);						\
   }
 DEFINST(ADDQI,			0x01,
 	"addq",			"a,i,c",
@@ -1064,7 +1064,7 @@ CONNECT(S4ADDQ_LINK)
 
 #define S4ADDQ_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << 2) + GPR(RB));				\
+    SET_GPR(TID, RC, (GPR(TID, RA) << 2) + GPR(TID, RB));				\
   }
 DEFINST(S4ADDQ,			0x00,
 	"s4addq",		"a,b,c",
@@ -1073,7 +1073,7 @@ DEFINST(S4ADDQ,			0x00,
 
 #define S4ADDQI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << 2) + IMM);					\
+    SET_GPR(TID, RC, (GPR(TID, RA) << 2) + IMM);					\
   }
 DEFINST(S4ADDQI,		0x01,
 	"s4addq",		"a,i,c",
@@ -1085,7 +1085,7 @@ CONNECT(SUBQ_LINK)
 
 #define SUBQ_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) - GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) - GPR(TID, RB));					\
   }
 DEFINST(SUBQ,			0x00,
 	"subq",			"a,b,c",
@@ -1094,7 +1094,7 @@ DEFINST(SUBQ,			0x00,
 
 #define SUBQI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) - IMM);						\
+    SET_GPR(TID, RC, GPR(TID, RA) - IMM);						\
   }
 DEFINST(SUBQI,			0x01,
 	"subq",			"a,i,c",
@@ -1106,7 +1106,7 @@ CONNECT(S4SUBQ_LINK)
 
 #define S4SUBQ_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << 2) - GPR(RB));				\
+    SET_GPR(TID, RC, (GPR(TID, RA) << 2) - GPR(TID, RB));				\
   }
 DEFINST(S4SUBQ,			0x00,
 	"s4subq",		"a,b,c",
@@ -1115,7 +1115,7 @@ DEFINST(S4SUBQ,			0x00,
 
 #define S4SUBQI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << 2) - IMM);					\
+    SET_GPR(TID, RC, (GPR(TID, RA) << 2) - IMM);					\
   }
 DEFINST(S4SUBQI,		0x01,
 	"s4subq",		"a,i,c",
@@ -1127,7 +1127,7 @@ CONNECT(CMPEQ_LINK)
 
 #define CMPEQ_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) == GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) == GPR(TID, RB));					\
   }
 DEFINST(CMPEQ,			0x00,
 	"cmpeq",		"a,b,c",
@@ -1136,7 +1136,7 @@ DEFINST(CMPEQ,			0x00,
 
 #define CMPEQI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) == (qword_t)IMM);				\
+    SET_GPR(TID, RC, GPR(TID, RA) == (qword_t)IMM);				\
   }
 DEFINST(CMPEQI,			0x01,
 	"cmpeq",		"a,i,c",
@@ -1148,7 +1148,7 @@ CONNECT(S8ADDQ_LINK)
 
 #define S8ADDQ_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << 3) + GPR(RB));				\
+    SET_GPR(TID, RC, (GPR(TID, RA) << 3) + GPR(TID, RB));				\
   }
 DEFINST(S8ADDQ,			0x00,
 	"s8addq",		"a,b,c",
@@ -1157,7 +1157,7 @@ DEFINST(S8ADDQ,			0x00,
 
 #define S8ADDQI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << 3) + IMM);					\
+    SET_GPR(TID, RC, (GPR(TID, RA) << 3) + IMM);					\
   }
 DEFINST(S8ADDQI,		0x01,
 	"s8addq",		"a,i,c",
@@ -1169,7 +1169,7 @@ CONNECT(S8SUBQ_LINK)
 
 #define S8SUBQ_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << 3) - GPR(RB));				\
+    SET_GPR(TID, RC, (GPR(TID, RA) << 3) - GPR(TID, RB));				\
   }
 DEFINST(S8SUBQ,			0x00,
 	"s8subq",		"a,b,c",
@@ -1178,7 +1178,7 @@ DEFINST(S8SUBQ,			0x00,
 
 #define S8SUBQI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << 3) - IMM);					\
+    SET_GPR(TID, RC, (GPR(TID, RA) << 3) - IMM);					\
   }
 DEFINST(S8SUBQI,		0x01,
 	"s8subq",		"a,i,c",
@@ -1190,7 +1190,7 @@ CONNECT(CMPULE_LINK)
 
 #define CMPULE_IMPL							\
   {									\
-    SET_GPR(RC, (qword_t)GPR(RA) <= (qword_t)GPR(RB));			\
+    SET_GPR(TID, RC, (qword_t)GPR(TID, RA) <= (qword_t)GPR(TID, RB));			\
   }
 DEFINST(CMPULE,			0x00,
 	"cmpule",		"a,b,c",
@@ -1199,7 +1199,7 @@ DEFINST(CMPULE,			0x00,
 
 #define CMPULEI_IMPL							\
   {									\
-    SET_GPR(RC, (qword_t)GPR(RA) <= (qword_t)IMM);			\
+    SET_GPR(TID, RC, (qword_t)GPR(TID, RA) <= (qword_t)IMM);			\
   }
 DEFINST(CMPULEI,		0x01,
 	"cmpule",		"a,i,c",
@@ -1212,7 +1212,7 @@ CONNECT(ADDLV_LINK)
 #define ADDLV_IMPL							\
   {									\
     /* FIXME: not checking for overflows... */				\
-    SET_GPR(RC, SEXT32((GPR(RA) + GPR(RB)) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) + GPR(TID, RB)) & ULL(0xffffffff)));		\
   }
 DEFINST(ADDLV,			0x00,
 	"addl/v (unimpl)",	"a,b,c",
@@ -1222,7 +1222,7 @@ DEFINST(ADDLV,			0x00,
 #define ADDLVI_IMPL							\
   {									\
     /* FIXME: not checking for overflows... */				\
-    SET_GPR(RC, SEXT32((GPR(RA) + IMM) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) + IMM) & ULL(0xffffffff)));		\
   }
 DEFINST(ADDLVI,			0x01,
 	"addl/v (unimpl)",	"a,i,c",
@@ -1234,7 +1234,7 @@ CONNECT(SUBLV_LINK)
 
 #define SUBLV_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32((GPR(RA) - GPR(RB)) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) - GPR(TID, RB)) & ULL(0xffffffff)));		\
   }
 DEFINST(SUBLV,			0x00,
 	"subl/v (unimpl)",	"a,b,c",
@@ -1243,7 +1243,7 @@ DEFINST(SUBLV,			0x00,
 
 #define SUBLVI_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32((GPR(RA) - IMM) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) - IMM) & ULL(0xffffffff)));		\
   }
 DEFINST(SUBLVI,			0x01,
 	"subl/v (unimpl)",	"a,i,c",
@@ -1255,7 +1255,7 @@ CONNECT(CMPLT_LINK)
 
 #define CMPLT_IMPL							\
   {									\
-    SET_GPR(RC, (sqword_t)GPR(RA) < (sqword_t)GPR(RB));			\
+    SET_GPR(TID, RC, (sqword_t)GPR(TID, RA) < (sqword_t)GPR(TID, RB));			\
   }
 DEFINST(CMPLT,			0x00,
 	"cmplt",		"a,b,c",
@@ -1264,7 +1264,7 @@ DEFINST(CMPLT,			0x00,
 
 #define CMPLTI_IMPL							\
   {									\
-    SET_GPR(RC, (sqword_t)GPR(RA) < (sqword_t)IMM);			\
+    SET_GPR(TID, RC, (sqword_t)GPR(TID, RA) < (sqword_t)IMM);			\
   }
 DEFINST(CMPLTI,		0x01,
 	"cmplt",		"a,i,c",
@@ -1277,7 +1277,7 @@ CONNECT(ADDQV_LINK)
 #define ADDQV_IMPL							\
   {									\
     /* FIXME: not checking for overflows... */				\
-    SET_GPR(RC, GPR(RA) + GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) + GPR(TID, RB));					\
   }
 DEFINST(ADDQV,			0x00,
 	"addq/v (unimpl)",	"a,b,c",
@@ -1287,7 +1287,7 @@ DEFINST(ADDQV,			0x00,
 #define ADDQVI_IMPL							\
   {									\
     /* FIXME: not checking for overflows... */				\
-    SET_GPR(RC, GPR(RA) + IMM);						\
+    SET_GPR(TID, RC, GPR(TID, RA) + IMM);						\
   }
 DEFINST(ADDQVI,			0x01,
 	"addq/v (unimpl)",	"a,i,c",
@@ -1300,7 +1300,7 @@ CONNECT(SUBQV_LINK)
 #define SUBQV_IMPL							\
   {									\
     /* FIXME: not checking for overflows... */				\
-    SET_GPR(RC, GPR(RA) - GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) - GPR(TID, RB));					\
   }
 DEFINST(SUBQV,			0x00,
 	"subq/v (unimpl)",	"a,b,c",
@@ -1310,7 +1310,7 @@ DEFINST(SUBQV,			0x00,
 #define SUBQVI_IMPL							\
   {									\
     /* FIXME: not checking for overflows... */				\
-    SET_GPR(RC, GPR(RA) - IMM);						\
+    SET_GPR(TID, RC, GPR(TID, RA) - IMM);						\
   }
 DEFINST(SUBQVI,			0x01,
 	"subq/v (unimpl)",	"a,b,c",
@@ -1322,7 +1322,7 @@ CONNECT(CMPLE_LINK)
 
 #define CMPLE_IMPL							\
   {									\
-    SET_GPR(RC, (sqword_t)GPR(RA) <= (sqword_t)GPR(RB));		\
+    SET_GPR(TID, RC, (sqword_t)GPR(TID, RA) <= (sqword_t)GPR(TID, RB));		\
   }
 DEFINST(CMPLE,			0x00,
 	"cmple",		"a,b,c",
@@ -1331,7 +1331,7 @@ DEFINST(CMPLE,			0x00,
 
 #define CMPLEI_IMPL							\
   {									\
-    SET_GPR(RC, (sqword_t)GPR(RA) <= (sqword_t)IMM);			\
+    SET_GPR(TID, RC, (sqword_t)GPR(TID, RA) <= (sqword_t)IMM);			\
   }
 DEFINST(CMPLEI,		0x01,
 	"cmple",		"a,i,c",
@@ -1380,7 +1380,7 @@ DEFLINK(CMOVGT_LINK, 0x66, "cmovgt_link", 12, 1)
  sim-outorder */
 #define IMPLVER_IMPL							\
   {									\
-    SET_GPR(RC, ULL(2));					        \
+    SET_GPR(TID, RC, ULL(2));					        \
   }
 DEFINST(IMPLVER,		0x6c,
 	"implver",		"c",
@@ -1392,7 +1392,7 @@ CONNECT(AND_LINK)
 
 #define AND_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) & GPR(TID, RB));					\
   }
 DEFINST(AND,			0x00,
 	"and",			"a,b,c",
@@ -1401,7 +1401,7 @@ DEFINST(AND,			0x00,
 
 #define ANDI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & IMM);						\
+    SET_GPR(TID, RC, GPR(TID, RA) & IMM);						\
   }
 DEFINST(ANDI,			0x01,
 	"and",			"a,i,c",
@@ -1413,7 +1413,7 @@ CONNECT(BIC_LINK)
 
 #define BIC_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & ~GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) & ~GPR(TID, RB));					\
   }
 DEFINST(BIC,			0x00,
 	"bic",			"a,b,c",
@@ -1422,7 +1422,7 @@ DEFINST(BIC,			0x00,
 
 #define BICI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & ~IMM);					\
+    SET_GPR(TID, RC, GPR(TID, RA) & ~IMM);					\
   }
 DEFINST(BICI,			0x01,
 	"bic",			"a,i,c",
@@ -1434,8 +1434,8 @@ CONNECT(CMOVLBS_LINK)
 
 #define CMOVLBS_IMPL							\
   {									\
-    if (GPR(RA) & 1)							\
-      SET_GPR(RC, GPR(RB));						\
+    if (GPR(TID, RA) & 1)							\
+      SET_GPR(TID, RC, GPR(TID, RB));						\
   }
 DEFINST(CMOVLBS,		0x00,
 	"cmovlbs",		"a,b,c",
@@ -1444,8 +1444,8 @@ DEFINST(CMOVLBS,		0x00,
 
 #define CMOVLBSI_IMPL							\
   {									\
-    if (GPR(RA) & 1)							\
-      SET_GPR(RC, IMM);							\
+    if (GPR(TID, RA) & 1)							\
+      SET_GPR(TID, RC, IMM);							\
   }
 DEFINST(CMOVLBSI,		0x01,
 	"cmovlbs",		"a,i,c",
@@ -1457,8 +1457,8 @@ CONNECT(CMOVLBC_LINK)
 
 #define CMOVLBC_IMPL							\
   {									\
-    if ((GPR(RA) & 1) == 0)						\
-      SET_GPR(RC, GPR(RB));						\
+    if ((GPR(TID, RA) & 1) == 0)						\
+      SET_GPR(TID, RC, GPR(TID, RB));						\
   }
 DEFINST(CMOVLBC,		0x00,
 	"cmovlbc",		"a,b,c",
@@ -1467,8 +1467,8 @@ DEFINST(CMOVLBC,		0x00,
 
 #define CMOVLBCI_IMPL							\
   {									\
-    if ((GPR(RA) & 1) == 0)						\
-      SET_GPR(RC, IMM);							\
+    if ((GPR(TID, RA) & 1) == 0)						\
+      SET_GPR(TID, RC, IMM);							\
   }
 DEFINST(CMOVLBCI,		0x01,
 	"cmovlbc",		"a,i,c",
@@ -1480,7 +1480,7 @@ CONNECT(BIS_LINK)
 
 #define BIS_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) | GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) | GPR(TID, RB));					\
   }
 DEFINST(BIS,			0x00,
 	"bis",			"a,b,c",
@@ -1489,7 +1489,7 @@ DEFINST(BIS,			0x00,
 
 #define BISI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) | IMM);						\
+    SET_GPR(TID, RC, GPR(TID, RA) | IMM);						\
   }
 DEFINST(BISI,			0x01,
 	"bis",			"a,i,c",
@@ -1501,8 +1501,8 @@ CONNECT(CMOVEQ_LINK)
 
 #define CMOVEQ_IMPL							\
   {									\
-    if (GPR(RA) == 0)							\
-      SET_GPR(RC, GPR(RB));						\
+    if (GPR(TID, RA) == 0)							\
+      SET_GPR(TID, RC, GPR(TID, RB));						\
   }
 DEFINST(CMOVEQ,			0x00,
 	"cmoveq",		"a,b,c",
@@ -1511,8 +1511,8 @@ DEFINST(CMOVEQ,			0x00,
 
 #define CMOVEQI_IMPL							\
   {									\
-    if (GPR(RA) == 0)							\
-      SET_GPR(RC, IMM);							\
+    if (GPR(TID, RA) == 0)							\
+      SET_GPR(TID, RC, IMM);							\
   }
 DEFINST(CMOVEQI,		0x01,
 	"cmoveq",		"a,i,c",
@@ -1524,8 +1524,8 @@ CONNECT(CMOVNE_LINK)
 
 #define CMOVNE_IMPL							\
   {									\
-    if (GPR(RA) != 0)							\
-      SET_GPR(RC, GPR(RB));						\
+    if (GPR(TID, RA) != 0)							\
+      SET_GPR(TID, RC, GPR(TID, RB));						\
   }
 DEFINST(CMOVNE,			0x00,
 	"cmovne",		"a,b,c",
@@ -1534,8 +1534,8 @@ DEFINST(CMOVNE,			0x00,
 
 #define CMOVNEI_IMPL							\
   {									\
-    if (GPR(RA) != 0)							\
-      SET_GPR(RC, IMM);							\
+    if (GPR(TID, RA) != 0)							\
+      SET_GPR(TID, RC, IMM);							\
   }
 DEFINST(CMOVNEI,		0x01,
 	"cmovne",		"a,i,c",
@@ -1547,7 +1547,7 @@ CONNECT(ORNOT_LINK)
 
 #define ORNOT_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) | ~GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) | ~GPR(TID, RB));					\
   }
 DEFINST(ORNOT,			0x00,
 	"ornot",		"a,b,c",
@@ -1556,7 +1556,7 @@ DEFINST(ORNOT,			0x00,
 
 #define ORNOTI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) | ~IMM);					\
+    SET_GPR(TID, RC, GPR(TID, RA) | ~IMM);					\
   }
 DEFINST(ORNOTI,			0x01,
 	"ornot",		"a,i,c",
@@ -1568,7 +1568,7 @@ CONNECT(XOR_LINK)
 
 #define XOR_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) ^ GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) ^ GPR(TID, RB));					\
   }
 DEFINST(XOR,			0x00,
 	"xor",			"a,b,c",
@@ -1577,7 +1577,7 @@ DEFINST(XOR,			0x00,
 
 #define XORI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) ^ IMM);						\
+    SET_GPR(TID, RC, GPR(TID, RA) ^ IMM);						\
   }
 DEFINST(XORI,			0x01,
 	"xor",			"a,i,c",
@@ -1589,8 +1589,8 @@ CONNECT(CMOVLT_LINK)
 
 #define CMOVLT_IMPL							\
   {									\
-    if ((sqword_t)GPR(RA) < LL(0))					\
-      SET_GPR(RC, GPR(RB));						\
+    if ((sqword_t)GPR(TID, RA) < LL(0))					\
+      SET_GPR(TID, RC, GPR(TID, RB));						\
   }
 DEFINST(CMOVLT,			0x00,
 	"cmovlt",		"a,b,c",
@@ -1599,8 +1599,8 @@ DEFINST(CMOVLT,			0x00,
 
 #define CMOVLTI_IMPL							\
   {									\
-    if ((sqword_t)GPR(RA) < LL(0))					\
-      SET_GPR(RC, IMM);							\
+    if ((sqword_t)GPR(TID, RA) < LL(0))					\
+      SET_GPR(TID, RC, IMM);							\
   }
 DEFINST(CMOVLTI,		0x01,
 	"cmovlt",		"a,i,c",
@@ -1612,8 +1612,8 @@ CONNECT(CMOVGE_LINK)
 
 #define CMOVGE_IMPL							\
   {									\
-    if ((sqword_t)GPR(RA) >= LL(0))					\
-      SET_GPR(RC, GPR(RB));						\
+    if ((sqword_t)GPR(TID, RA) >= LL(0))					\
+      SET_GPR(TID, RC, GPR(TID, RB));						\
   }
 DEFINST(CMOVGE,			0x00,
 	"cmovge",		"a,b,c",
@@ -1622,8 +1622,8 @@ DEFINST(CMOVGE,			0x00,
 
 #define CMOVGEI_IMPL							\
   {									\
-    if ((sqword_t)GPR(RA) >= LL(0))					\
-      SET_GPR(RC, IMM);							\
+    if ((sqword_t)GPR(TID, RA) >= LL(0))					\
+      SET_GPR(TID, RC, IMM);							\
   }
 DEFINST(CMOVGEI,		0x01,
 	"cmovge",		"a,i,c",
@@ -1635,7 +1635,7 @@ CONNECT(EQV_LINK)
 
 #define EQV_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) ^ ~GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) ^ ~GPR(TID, RB));					\
   }
 DEFINST(EQV,			0x00,
 	"eqv",			"a,b,c",
@@ -1644,7 +1644,7 @@ DEFINST(EQV,			0x00,
 
 #define EQVI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) ^ ~IMM);					\
+    SET_GPR(TID, RC, GPR(TID, RA) ^ ~IMM);					\
   }
 DEFINST(EQVI,			0x01,
 	"eqv",			"a,i,c",
@@ -1663,7 +1663,7 @@ CONNECT(AMASK_LINK)
 */
 #define AMASK_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RB) & ULL(0xfffffffffffffef8));			\
+    SET_GPR(TID, RC, GPR(TID, RB) & ULL(0xfffffffffffffef8));			\
   }
 DEFINST(AMASK,			0x00,
 	"amask",		"b,c",
@@ -1672,7 +1672,7 @@ DEFINST(AMASK,			0x00,
 
 #define AMASKI_IMPL							\
   {									\
-    SET_GPR(RC, IMM & ULL(0xfffffffffffffef8));				\
+    SET_GPR(TID, RC, IMM & ULL(0xfffffffffffffef8));				\
   }
 DEFINST(AMASKI,			0x01,
 	"amask",		"i,c",
@@ -1684,8 +1684,8 @@ CONNECT(CMOVLE_LINK)
 
 #define CMOVLE_IMPL							\
   {									\
-    if ((sqword_t)GPR(RA) <= LL(0))					\
-      SET_GPR(RC, GPR(RB));						\
+    if ((sqword_t)GPR(TID, RA) <= LL(0))					\
+      SET_GPR(TID, RC, GPR(TID, RB));						\
   }
 DEFINST(CMOVLE,			0x00,
 	"cmovle",		"a,b,c",
@@ -1694,8 +1694,8 @@ DEFINST(CMOVLE,			0x00,
 
 #define CMOVLEI_IMPL							\
   {									\
-    if ((sqword_t)GPR(RA) <= LL(0))					\
-      SET_GPR(RC, IMM);							\
+    if ((sqword_t)GPR(TID, RA) <= LL(0))					\
+      SET_GPR(TID, RC, IMM);							\
   }
 DEFINST(CMOVLEI,		0x01,
 	"cmovle",		"a,i,c",
@@ -1707,8 +1707,8 @@ CONNECT(CMOVGT_LINK)
 
 #define CMOVGT_IMPL							\
   {									\
-    if ((sqword_t)GPR(RA) > LL(0))					\
-      SET_GPR(RC, GPR(RB));						\
+    if ((sqword_t)GPR(TID, RA) > LL(0))					\
+      SET_GPR(TID, RC, GPR(TID, RB));						\
   }
 DEFINST(CMOVGT,			0x00,
 	"cmovgt",		"a,b,c",
@@ -1717,8 +1717,8 @@ DEFINST(CMOVGT,			0x00,
 
 #define CMOVGTI_IMPL							\
   {									\
-    if ((sqword_t)GPR(RA) > LL(0))					\
-      SET_GPR(RC, IMM);							\
+    if ((sqword_t)GPR(TID, RA) > LL(0))					\
+      SET_GPR(TID, RC, IMM);							\
   }
 DEFINST(CMOVGTI,		0x01,
 	"cmovgt",		"a,i,c",
@@ -1785,7 +1785,7 @@ CONNECT(MSKBL_LINK)
 
 #define MSKBL_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & ~(ULL(0xff) << ((GPR(RB) & 0x7) * 8)));	\
+    SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xff) << ((GPR(TID, RB) & 0x7) * 8)));	\
   }
 DEFINST(MSKBL,			0x00,
 	"mskbl",		"a,b,c",
@@ -1794,7 +1794,7 @@ DEFINST(MSKBL,			0x00,
 
 #define MSKBLI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & ~(ULL(0xff) << ((IMM & 0x7) * 8)));		\
+    SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xff) << ((IMM & 0x7) * 8)));		\
   }
 DEFINST(MSKBLI,			0x01,
 	"mskbl",		"a,i,c",
@@ -1806,7 +1806,7 @@ CONNECT(EXTBL_LINK)
 
 #define EXTBL_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) >> ((GPR(RB) & 0x7) * 8)) & LL(0xff));		\
+    SET_GPR(TID, RC, (GPR(TID, RA) >> ((GPR(TID, RB) & 0x7) * 8)) & LL(0xff));		\
   }
 DEFINST(EXTBL,			0x00,
 	"extbl",		"a,b,c",
@@ -1815,7 +1815,7 @@ DEFINST(EXTBL,			0x00,
 
 #define EXTBLI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) >> ((IMM & 0x7) * 8)) & LL(0xff));		\
+    SET_GPR(TID, RC, (GPR(TID, RA) >> ((IMM & 0x7) * 8)) & LL(0xff));		\
   }
 DEFINST(EXTBLI,			0x01,
 	"extbl",		"a,i,c",
@@ -1827,8 +1827,8 @@ CONNECT(INSBL_LINK)
 
 #define INSBL_IMPL							\
   {									\
-    SET_GPR(RC, ((GPR(RA) << ((GPR(RB) & 0x7) * 8))			\
-		     & (ULL(0xff) << ((GPR(RB) & 0x7) * 8))));		\
+    SET_GPR(TID, RC, ((GPR(TID, RA) << ((GPR(TID, RB) & 0x7) * 8))			\
+		     & (ULL(0xff) << ((GPR(TID, RB) & 0x7) * 8))));		\
   }
 DEFINST(INSBL,			0x00,
 	"insbl",		"a,b,c",
@@ -1837,7 +1837,7 @@ DEFINST(INSBL,			0x00,
 
 #define INSBLI_IMPL							\
   {									\
-    SET_GPR(RC, ((GPR(RA) << ((IMM & 0x7) * 8))				\
+    SET_GPR(TID, RC, ((GPR(TID, RA) << ((IMM & 0x7) * 8))				\
 		     & (ULL(0xff) << ((IMM & 0x7) * 8))));		\
   }
 DEFINST(INSBLI,			0x01,
@@ -1850,7 +1850,7 @@ CONNECT(MSKWL_LINK)
 
 #define MSKWL_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & ~(ULL(0xffff) << ((GPR(RB) & 0x7) * 8)));	\
+    SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xffff) << ((GPR(TID, RB) & 0x7) * 8)));	\
   }
 DEFINST(MSKWL,			0x00,
 	"mskwl",		"a,b,c",
@@ -1859,7 +1859,7 @@ DEFINST(MSKWL,			0x00,
 
 #define MSKWLI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & ~(ULL(0xffff) << ((IMM & 0x7) * 8)));		\
+    SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xffff) << ((IMM & 0x7) * 8)));		\
   }
 DEFINST(MSKWLI,			0x01,
 	"mskwl",		"a,i,c",
@@ -1871,7 +1871,7 @@ CONNECT(EXTWL_LINK)
 
 #define EXTWL_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) >> ((GPR(RB) & 0x7) * 8)) & LL(0xffff));	\
+    SET_GPR(TID, RC, (GPR(TID, RA) >> ((GPR(TID, RB) & 0x7) * 8)) & LL(0xffff));	\
   }
 DEFINST(EXTWL,			0x00,
 	"extwl",		"a,b,c",
@@ -1880,7 +1880,7 @@ DEFINST(EXTWL,			0x00,
 
 #define EXTWLI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) >> ((IMM & 0x7) * 8)) & LL(0xffff));		\
+    SET_GPR(TID, RC, (GPR(TID, RA) >> ((IMM & 0x7) * 8)) & LL(0xffff));		\
   }
 DEFINST(EXTWLI,			0x01,
 	"extwl",		"a,i,c",
@@ -1892,8 +1892,8 @@ CONNECT(INSWL_LINK)
 
 #define INSWL_IMPL							\
   {									\
-    SET_GPR(RC, ((GPR(RA) << ((GPR(RB) & 0x7) * 8))			\
-		     & (ULL(0xffff) << ((GPR(RB) & 0x7) * 8))));	\
+    SET_GPR(TID, RC, ((GPR(TID, RA) << ((GPR(TID, RB) & 0x7) * 8))			\
+		     & (ULL(0xffff) << ((GPR(TID, RB) & 0x7) * 8))));	\
   }
 DEFINST(INSWL,			0x00,
 	"inswl",		"a,b,c",
@@ -1902,7 +1902,7 @@ DEFINST(INSWL,			0x00,
 
 #define INSWLI_IMPL							\
   {									\
-    SET_GPR(RC, ((GPR(RA) << ((IMM & 0x7) * 8))				\
+    SET_GPR(TID, RC, ((GPR(TID, RA) << ((IMM & 0x7) * 8))				\
 		     & (ULL(0xffff) << ((IMM & 0x7) * 8))));		\
   }
 DEFINST(INSWLI,			0x01,
@@ -1915,7 +1915,7 @@ CONNECT(MSKLL_LINK)
 
 #define MSKLL_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & ~(ULL(0xffffffff) << ((GPR(RB) & 0x7) * 8)));	\
+    SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xffffffff) << ((GPR(TID, RB) & 0x7) * 8)));	\
   }
 DEFINST(MSKLL,			0x00,
 	"mskll",		"a,b,c",
@@ -1924,7 +1924,7 @@ DEFINST(MSKLL,			0x00,
 
 #define MSKLLI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) & ~(ULL(0xffffffff) << ((IMM & 0x7) * 8)));	\
+    SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xffffffff) << ((IMM & 0x7) * 8)));	\
   }
 DEFINST(MSKLLI,			0x01,
 	"mskll",		"a,i,c",
@@ -1936,7 +1936,7 @@ CONNECT(EXTLL_LINK)
 
 #define EXTLL_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) >> ((GPR(RB) & 0x7) * 8)) & LL(0xffffffff));	\
+    SET_GPR(TID, RC, (GPR(TID, RA) >> ((GPR(TID, RB) & 0x7) * 8)) & LL(0xffffffff));	\
   }
 DEFINST(EXTLL,			0x00,
 	"extll",		"a,b,c",
@@ -1945,7 +1945,7 @@ DEFINST(EXTLL,			0x00,
 
 #define EXTLLI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) >> ((IMM & 0x7) * 8)) & LL(0xffffffff));	\
+    SET_GPR(TID, RC, (GPR(TID, RA) >> ((IMM & 0x7) * 8)) & LL(0xffffffff));	\
   }
 DEFINST(EXTLLI,			0x01,
 	"extll",		"a,i,c",
@@ -1957,8 +1957,8 @@ CONNECT(INSLL_LINK)
 
 #define INSLL_IMPL							\
   {									\
-    SET_GPR(RC, ((GPR(RA) << ((GPR(RB) & 0x7) * 8))			\
-		     & (ULL(0xffffffff) << ((GPR(RB) & 0x7) * 8))));	\
+    SET_GPR(TID, RC, ((GPR(TID, RA) << ((GPR(TID, RB) & 0x7) * 8))			\
+		     & (ULL(0xffffffff) << ((GPR(TID, RB) & 0x7) * 8))));	\
   }
 DEFINST(INSLL,			0x00,
 	"insll",		"a,b,c",
@@ -1967,7 +1967,7 @@ DEFINST(INSLL,			0x00,
 
 #define INSLLI_IMPL							\
   {									\
-    SET_GPR(RC, ((GPR(RA) << ((IMM & 0x7) * 8))				\
+    SET_GPR(TID, RC, ((GPR(TID, RA) << ((IMM & 0x7) * 8))				\
 		     & (ULL(0xffffffff) << ((IMM & 0x7) * 8))));	\
   }
 DEFINST(INSLLI,			0x01,
@@ -1982,14 +1982,14 @@ CONNECT(ZAP_LINK)
   {									\
     int _i;								\
     qword_t _temp = LL(0xff);						\
-    qword_t _rav = GPR(RA);						\
-    qword_t _rbv = GPR(RB);						\
+    qword_t _rav = GPR(TID, RA);						\
+    qword_t _rbv = GPR(TID, RB);						\
 									\
-    SET_GPR(RC, 0);							\
+    SET_GPR(TID, RC, 0);							\
     for (_i = 1; _i < 0x100; _i = _i << 1)				\
       {									\
 	if (_i & ~_rbv)							\
-	  SET_GPR(RC, GPR(RC) | (_rav & _temp));			\
+	  SET_GPR(TID, RC, GPR(TID, RC) | (_rav & _temp));			\
 	_temp = _temp << 8;						\
       }									\
   }
@@ -2002,14 +2002,14 @@ DEFINST(ZAP,			0x00,
   {									\
     int _i;								\
     qword_t _temp = LL(0xff);						\
-    qword_t _rav = GPR(RA);						\
+    qword_t _rav = GPR(TID, RA);						\
     qword_t _rbv = IMM;							\
 									\
-    SET_GPR(RC, 0);							\
+    SET_GPR(TID, RC, 0);							\
     for (_i = 1; _i < 0x100; _i = _i << 1)				\
       {									\
 	if (_i & ~_rbv)							\
-	  SET_GPR(RC, GPR(RC) | (_rav & _temp));			\
+	  SET_GPR(TID, RC, GPR(TID, RC) | (_rav & _temp));			\
 	_temp = _temp << 8;						\
       }									\
   }
@@ -2025,14 +2025,14 @@ CONNECT(ZAPNOT_LINK)
   {									\
     int _i;								\
     qword_t _temp = LL(0xff);						\
-    qword_t _rav = GPR(RA);						\
-    qword_t _rbv = GPR(RB);						\
+    qword_t _rav = GPR(TID, RA);						\
+    qword_t _rbv = GPR(TID, RB);						\
 									\
-    SET_GPR(RC, 0);							\
+    SET_GPR(TID, RC, 0);							\
     for (_i = 1; _i < 0x100; _i = _i << 1)				\
       {									\
 	if (_i & _rbv)							\
-	  SET_GPR(RC, GPR(RC) | (_rav & _temp));			\
+	  SET_GPR(TID, RC, GPR(TID, RC) | (_rav & _temp));			\
 	_temp = _temp << 8;						\
       }									\
   }
@@ -2045,14 +2045,14 @@ DEFINST(ZAPNOT,			0x00,
   {									\
     int _i;								\
     qword_t _temp = LL(0xff);						\
-    qword_t _rav = GPR(RA);						\
+    qword_t _rav = GPR(TID, RA);						\
     qword_t _rbv = IMM;							\
 									\
-    SET_GPR(RC, 0);							\
+    SET_GPR(TID, RC, 0);							\
     for (_i = 1; _i < 0x100; _i = _i << 1)				\
       {									\
 	if (_i & _rbv)							\
-	  SET_GPR(RC, GPR(RC) | (_rav & _temp));			\
+	  SET_GPR(TID, RC, GPR(TID, RC) | (_rav & _temp));			\
 	_temp = _temp << 8;						\
       }									\
   }
@@ -2066,9 +2066,9 @@ CONNECT(MSKQL_LINK)
 
 #define MSKQL_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA)						\
+    SET_GPR(TID, RC, (GPR(TID, RA)						\
 		 & ~(ULL(0xffffffffffffffff)				\
-		     << ((GPR(RB) & 0x7) * 8))));			\
+		     << ((GPR(TID, RB) & 0x7) * 8))));			\
   }
 DEFINST(MSKQL,			0x00,
 	"mskql",		"a,b,c",
@@ -2077,7 +2077,7 @@ DEFINST(MSKQL,			0x00,
 
 #define MSKQLI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA)						\
+    SET_GPR(TID, RC, (GPR(TID, RA)						\
 		 & ~(ULL(0xffffffffffffffff) << ((IMM & 0x7) * 8))));	\
   }
 DEFINST(MSKQLI,			0x01,
@@ -2090,7 +2090,7 @@ CONNECT(SRL_LINK)
 
 #define SRL_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) >> (GPR(RB) & 0x3f));				\
+    SET_GPR(TID, RC, GPR(TID, RA) >> (GPR(TID, RB) & 0x3f));				\
   }
 DEFINST(SRL,			0x00,
 	"srl",			"a,b,c",
@@ -2099,7 +2099,7 @@ DEFINST(SRL,			0x00,
 
 #define SRLI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) >> (IMM & 0x3f));				\
+    SET_GPR(TID, RC, GPR(TID, RA) >> (IMM & 0x3f));				\
   }
 DEFINST(SRLI,			0x01,
 	"srl",		"a,i,c",
@@ -2111,7 +2111,7 @@ CONNECT(EXTQL_LINK)
 
 #define EXTQL_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) >> ((GPR(RB) & 0x7) * 8));			\
+    SET_GPR(TID, RC, GPR(TID, RA) >> ((GPR(TID, RB) & 0x7) * 8));			\
   }
 DEFINST(EXTQL,			0x00,
 	"extql",		"a,b,c",
@@ -2120,7 +2120,7 @@ DEFINST(EXTQL,			0x00,
 
 #define EXTQLI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) >> ((IMM & 0x7) * 8));				\
+    SET_GPR(TID, RC, GPR(TID, RA) >> ((IMM & 0x7) * 8));				\
   }
 DEFINST(EXTQLI,			0x01,
 	"extql",		"a,i,c",
@@ -2132,7 +2132,7 @@ CONNECT(SLL_LINK)
 
 #define	SLL_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) << (GPR(RB) & 0x3f));				\
+    SET_GPR(TID, RC, GPR(TID, RA) << (GPR(TID, RB) & 0x3f));				\
   }
 DEFINST(SLL,			0x00,
 	"sll",			"a,b,c",
@@ -2141,7 +2141,7 @@ DEFINST(SLL,			0x00,
 
 #define SLLI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) << (IMM & 0x3f));				\
+    SET_GPR(TID, RC, GPR(TID, RA) << (IMM & 0x3f));				\
   }
 DEFINST(SLLI,			0x01,
 	"sll",			"a,i,c",
@@ -2153,8 +2153,8 @@ CONNECT(INSQL_LINK)
 
 #define INSQL_IMPL							\
   {									\
-    SET_GPR(RC, ((GPR(RA) << ((GPR(RB) & 0x7) * 8))			\
-		 & (ULL(0xffffffffffffffff) << ((GPR(RB) & 0x7) * 8))));\
+    SET_GPR(TID, RC, ((GPR(TID, RA) << ((GPR(TID, RB) & 0x7) * 8))			\
+		 & (ULL(0xffffffffffffffff) << ((GPR(TID, RB) & 0x7) * 8))));\
   }
 DEFINST(INSQL,			0x00,
 	"insql",		"a,b,c",
@@ -2163,7 +2163,7 @@ DEFINST(INSQL,			0x00,
 
 #define INSQLI_IMPL							\
   {									\
-    SET_GPR(RC, ((GPR(RA) << ((IMM & 0x7) * 8))				\
+    SET_GPR(TID, RC, ((GPR(TID, RA) << ((IMM & 0x7) * 8))				\
 		 & (ULL(0xffffffffffffffff) << ((IMM & 0x7) * 8))));	\
   }
 DEFINST(INSQLI,			0x01,
@@ -2175,7 +2175,7 @@ CONNECT(SRA_LINK)
 
 #define SRA_IMPL							\
   {									\
-    SET_GPR(RC, (sqword_t)GPR(RA) >> (GPR(RB) & 0x3f));			\
+    SET_GPR(TID, RC, (sqword_t)GPR(TID, RA) >> (GPR(TID, RB) & 0x3f));			\
   }
 DEFINST(SRA,			0x00,
 	"sra",			"a,b,c",
@@ -2184,7 +2184,7 @@ DEFINST(SRA,			0x00,
 
 #define SRAI_IMPL							\
   {									\
-    SET_GPR(RC, (sqword_t)GPR(RA) >> (IMM & 0x3f));			\
+    SET_GPR(TID, RC, (sqword_t)GPR(TID, RA) >> (IMM & 0x3f));			\
   }
 DEFINST(SRAI,			0x01,
 	"sra",		"a,i,c",
@@ -2196,10 +2196,10 @@ CONNECT(MSKWH_LINK)
 
 #define MSKWH_IMPL							\
   {									\
-    if ((GPR(RB) & 0x7) != 0)						\
-      SET_GPR(RC, GPR(RA) & ~(ULL(0xffff) >> ((8 - (GPR(RB) & 0x7)) * 8)));\
+    if ((GPR(TID, RB) & 0x7) != 0)						\
+      SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xffff) >> ((8 - (GPR(TID, RB) & 0x7)) * 8)));\
     else								\
-      SET_GPR(RC, GPR(RA));						\
+      SET_GPR(TID, RC, GPR(TID, RA));						\
   }
 DEFINST(MSKWH,			0x00,
 	"mskwh",		"a,b,c",
@@ -2209,9 +2209,9 @@ DEFINST(MSKWH,			0x00,
 #define MSKWHI_IMPL							\
   {									\
     if ((IMM & 0x7) != 0)						\
-      SET_GPR(RC, GPR(RA) & ~(ULL(0xffff) >> ((8 - (IMM & 0x7)) * 8)));	\
+      SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xffff) >> ((8 - (IMM & 0x7)) * 8)));	\
     else								\
-      SET_GPR(RC, GPR(RA));						\
+      SET_GPR(TID, RC, GPR(TID, RA));						\
   }
 DEFINST(MSKWHI,			0x01,
 	"mskwh",		"a,i,c",
@@ -2223,11 +2223,11 @@ CONNECT(INSWH_LINK)
 
 #define INSWH_IMPL							\
   {									\
-    if ((GPR(RB) & 0x7) != 0)						\
-      SET_GPR(RC, ((GPR(RA) >> (63 - (GPR(RB) & 0x7) * 8)) >> 1		\
-		   & (ULL(0xffff) >> ((8 - (GPR(RB) & 0x7)) * 8))));	\
+    if ((GPR(TID, RB) & 0x7) != 0)						\
+      SET_GPR(TID, RC, ((GPR(TID, RA) >> (63 - (GPR(TID, RB) & 0x7) * 8)) >> 1		\
+		   & (ULL(0xffff) >> ((8 - (GPR(TID, RB) & 0x7)) * 8))));	\
     else								\
-      SET_GPR(RC, 0);							\
+      SET_GPR(TID, RC, 0);							\
   }
 DEFINST(INSWH,			0x00,
 	"inswh",		"a,b,c",
@@ -2237,10 +2237,10 @@ DEFINST(INSWH,			0x00,
 #define INSWHI_IMPL							\
   {									\
     if ((IMM & 0x7) != 0)						\
-      SET_GPR(RC, ((GPR(RA) >> (63 - (IMM & 0x7) * 8)) >> 1		\
+      SET_GPR(TID, RC, ((GPR(TID, RA) >> (63 - (IMM & 0x7) * 8)) >> 1		\
 		   & (ULL(0xffff) >> ((8 - (IMM & 0x7)) * 8))));	\
     else								\
-      SET_GPR(RC, 0);							\
+      SET_GPR(TID, RC, 0);							\
   }
 DEFINST(INSWHI,			0x01,
 	"inswh",		"a,i,c",
@@ -2252,7 +2252,7 @@ CONNECT(EXTWH_LINK)
 
 #define EXTWH_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << ((64 - (GPR(RB)&0x7) * 8) & 0x3f)) & LL(0xffff));\
+    SET_GPR(TID, RC, (GPR(TID, RA) << ((64 - (GPR(TID, RB)&0x7) * 8) & 0x3f)) & LL(0xffff));\
   }
 DEFINST(EXTWH,			0x00,
 	"extwh",		"a,b,c",
@@ -2261,7 +2261,7 @@ DEFINST(EXTWH,			0x00,
 
 #define EXTWHI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << ((64 - (IMM & 0x7) * 8) & 0x3f)) & LL(0xffff));\
+    SET_GPR(TID, RC, (GPR(TID, RA) << ((64 - (IMM & 0x7) * 8) & 0x3f)) & LL(0xffff));\
   }
 DEFINST(EXTWHI,			0x01,
 	"extwh",		"a,i,c",
@@ -2273,11 +2273,11 @@ CONNECT(MSKLH_LINK)
 
 #define MSKLH_IMPL							\
   {									\
-    if ((GPR(RB) & 0x7) != 0)						\
-      SET_GPR(RC, GPR(RA) & ~(ULL(0xffffffff) >>			\
-			      ((8 - (GPR(RB) & 0x7)) * 8)));		\
+    if ((GPR(TID, RB) & 0x7) != 0)						\
+      SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xffffffff) >>			\
+			      ((8 - (GPR(TID, RB) & 0x7)) * 8)));		\
     else								\
-      SET_GPR(RC, GPR(RA));						\
+      SET_GPR(TID, RC, GPR(TID, RA));						\
   }
 DEFINST(MSKLH,			0x00,
 	"msklh",		"a,b,c",
@@ -2287,10 +2287,10 @@ DEFINST(MSKLH,			0x00,
 #define MSKLHI_IMPL							\
   {									\
     if ((IMM & 0x7) != 0)						\
-      SET_GPR(RC, GPR(RA) & ~(ULL(0xffffffff) >>			\
+      SET_GPR(TID, RC, GPR(TID, RA) & ~(ULL(0xffffffff) >>			\
 			      ((8 - (IMM & 0x7)) * 8)));		\
     else								\
-      SET_GPR(RC, GPR(RA));						\
+      SET_GPR(TID, RC, GPR(TID, RA));						\
   }
 DEFINST(MSKLHI,			0x01,
 	"msklh",		"a,i,c",
@@ -2302,11 +2302,11 @@ CONNECT(INSLH_LINK)
 
 #define INSLH_IMPL							\
   {									\
-    if ((GPR(RB) & 0x7) != 0)						\
-      SET_GPR(RC, ((GPR(RA) >> (63 - (GPR(RB) & 0x7) * 8)) >> 1		\
-		   & (ULL(0xffffffff) >> ((8 - (GPR(RB) & 0x7)) * 8))));\
+    if ((GPR(TID, RB) & 0x7) != 0)						\
+      SET_GPR(TID, RC, ((GPR(TID, RA) >> (63 - (GPR(TID, RB) & 0x7) * 8)) >> 1		\
+		   & (ULL(0xffffffff) >> ((8 - (GPR(TID, RB) & 0x7)) * 8))));\
     else								\
-      SET_GPR(RC, 0);							\
+      SET_GPR(TID, RC, 0);							\
   }
 DEFINST(INSLH,			0x00,
 	"inslh",		"a,b,c",
@@ -2316,9 +2316,9 @@ DEFINST(INSLH,			0x00,
 #define INSLHI_IMPL							\
   {									\
     if ((IMM & 0x7) != 0)						\
-      SET_GPR(RC, ((GPR(RA) >> (63 - (IMM & 0x7) * 8)) >> 1		\
+      SET_GPR(TID, RC, ((GPR(TID, RA) >> (63 - (IMM & 0x7) * 8)) >> 1		\
 		   & (ULL(0xffffffff) >> ((8 - (IMM & 0x7)) * 8))));	\
-    SET_GPR(RC, 0);							\
+    SET_GPR(TID, RC, 0);							\
   }
 DEFINST(INSLHI,			0x01,
 	"inslh",		"a,i,c",
@@ -2330,8 +2330,8 @@ CONNECT(EXTLH_LINK)
 
 #define EXTLH_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) <<						\
-		 ((64 - (GPR(RB) & 0x7) * 8) & 0x3f)) & LL(0xffffffff));\
+    SET_GPR(TID, RC, (GPR(TID, RA) <<						\
+		 ((64 - (GPR(TID, RB) & 0x7) * 8) & 0x3f)) & LL(0xffffffff));\
   }
 DEFINST(EXTLH,			0x00,
 	"extlh",		"a,b,c",
@@ -2340,7 +2340,7 @@ DEFINST(EXTLH,			0x00,
 
 #define EXTLHI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << ((64 - (IMM&0x7) * 8) & 0x3f)) & LL(0xffffffff));\
+    SET_GPR(TID, RC, (GPR(TID, RA) << ((64 - (IMM&0x7) * 8) & 0x3f)) & LL(0xffffffff));\
   }
 DEFINST(EXTLHI,			0x01,
 	"extlh",		"a,i,c",
@@ -2352,11 +2352,11 @@ CONNECT(MSKQH_LINK)
 
 #define MSKQH_IMPL							\
   {									\
-    if ((GPR(RB) & 0x7) != 0)						\
-      SET_GPR(RC, (GPR(RA) & ~(ULL(0xffffffffffffffff)			\
-			       >> ((8 - (GPR(RB) & 0x7)) * 8))));	\
+    if ((GPR(TID, RB) & 0x7) != 0)						\
+      SET_GPR(TID, RC, (GPR(TID, RA) & ~(ULL(0xffffffffffffffff)			\
+			       >> ((8 - (GPR(TID, RB) & 0x7)) * 8))));	\
     else								\
-      SET_GPR(RC, GPR(RA));						\
+      SET_GPR(TID, RC, GPR(TID, RA));						\
   }
 DEFINST(MSKQH,			0x00,
 	"mskqh",		"a,b,c",
@@ -2366,10 +2366,10 @@ DEFINST(MSKQH,			0x00,
 #define MSKQHI_IMPL							\
   {									\
     if ((IMM & 0x7) != 0)						\
-      SET_GPR(RC, (GPR(RA) & ~(ULL(0xffffffffffffffff)			\
+      SET_GPR(TID, RC, (GPR(TID, RA) & ~(ULL(0xffffffffffffffff)			\
 			       >> ((8 - (IMM & 0x7)) * 8))));		\
     else								\
-      SET_GPR(RC, GPR(RA));						\
+      SET_GPR(TID, RC, GPR(TID, RA));						\
   }
 DEFINST(MSKQHI,			0x01,
 	"mskqh",		"a,i,c",
@@ -2381,12 +2381,12 @@ CONNECT(INSQH_LINK)
 
 #define INSQH_IMPL							\
   {									\
-    if ((GPR(RB) & 0x7) != 0)						\
-      SET_GPR(RC, ((GPR(RA) >> (63 - (GPR(RB) & 0x7) * 8)) >> 1		\
+    if ((GPR(TID, RB) & 0x7) != 0)						\
+      SET_GPR(TID, RC, ((GPR(TID, RA) >> (63 - (GPR(TID, RB) & 0x7) * 8)) >> 1		\
 		   & (ULL(0xffffffffffffffff)				\
-		      >> ((8 - (GPR(RB) & 0x7)) * 8))));		\
+		      >> ((8 - (GPR(TID, RB) & 0x7)) * 8))));		\
     else								\
-      SET_GPR(RC, 0);							\
+      SET_GPR(TID, RC, 0);							\
   }
 DEFINST(INSQH,			0x00,
 	"insqh",		"a,b,c",
@@ -2396,11 +2396,11 @@ DEFINST(INSQH,			0x00,
 #define INSQHI_IMPL							\
   {									\
     if ((IMM & 0x7) != 0)						\
-      SET_GPR(RC, ((GPR(RA) >> (63 - (IMM & 0x7) * 8)) >> 1		\
+      SET_GPR(TID, RC, ((GPR(TID, RA) >> (63 - (IMM & 0x7) * 8)) >> 1		\
 		   & (ULL(0xffffffffffffffff)				\
 		      >> ((8 - (IMM & 0x7)) * 8))));			\
     else								\
-      SET_GPR(RC, 0);							\
+      SET_GPR(TID, RC, 0);							\
   }
 DEFINST(INSQHI,			0x01,
 	"insqh",		"a,i,c",
@@ -2412,7 +2412,7 @@ CONNECT(EXTQH_LINK)
 
 #define EXTQH_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << ((64 - (GPR(RB) & 0x7) * 8) & 0x3f)));	\
+    SET_GPR(TID, RC, (GPR(TID, RA) << ((64 - (GPR(TID, RB) & 0x7) * 8) & 0x3f)));	\
   }
 DEFINST(EXTQH,			0x00,
 	"extqh",		"a,b,c",
@@ -2421,7 +2421,7 @@ DEFINST(EXTQH,			0x00,
 
 #define EXTQHI_IMPL							\
   {									\
-    SET_GPR(RC, (GPR(RA) << ((64 - (IMM & 0x7) * 8) & 0x3f)));		\
+    SET_GPR(TID, RC, (GPR(TID, RA) << ((64 - (IMM & 0x7) * 8) & 0x3f)));		\
   }
 DEFINST(EXTQHI,			0x01,
 	"extqh",		"a,i,c",
@@ -2447,7 +2447,7 @@ CONNECT(MULL_LINK)
 
 #define MULL_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32((GPR(RA) * GPR(RB)) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) * GPR(TID, RB)) & ULL(0xffffffff)));		\
   }
 DEFINST(MULL,			0x00,
 	"mull",			"a,b,c",
@@ -2456,7 +2456,7 @@ DEFINST(MULL,			0x00,
 
 #define MULLI_IMPL							\
   {									\
-    SET_GPR(RC, SEXT32((GPR(RA) * IMM) & ULL(0xffffffff)));		\
+    SET_GPR(TID, RC, SEXT32((GPR(TID, RA) * IMM) & ULL(0xffffffff)));		\
   }
 DEFINST(MULLI,			0x01,
 	"mull",			"a,i,c",
@@ -2468,7 +2468,7 @@ CONNECT(MULQ_LINK)
 
 #define MULQ_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) * GPR(RB));					\
+    SET_GPR(TID, RC, GPR(TID, RA) * GPR(TID, RB));					\
   }
 DEFINST(MULQ,			0x00,
 	"mulq",			"a,b,c",
@@ -2477,7 +2477,7 @@ DEFINST(MULQ,			0x00,
 
 #define MULQI_IMPL							\
   {									\
-    SET_GPR(RC, GPR(RA) * IMM);						\
+    SET_GPR(TID, RC, GPR(TID, RA) * IMM);						\
   }
 DEFINST(MULQI,			0x01,
 	"mulq",			"a,i,c",
@@ -2489,8 +2489,8 @@ CONNECT(UMULH_LINK)
 
 #define UMULH_IMPL							\
   {									\
-    sqword_t _v1 = GPR(RA);						\
-    sqword_t _v2 = GPR(RB);						\
+    sqword_t _v1 = GPR(TID, RA);						\
+    sqword_t _v2 = GPR(TID, RB);						\
     qword_t _result;							\
     qword_t _a, _b, _c, _d;						\
     qword_t _bd, _ad, _cb, _ac;						\
@@ -2519,7 +2519,7 @@ CONNECT(UMULH_LINK)
       _ac + (_carry_mid << 32) + ((_mid2 >> 32) & LL(0xffffffff));	\
     /*myfprintf(stderr, "    %p %p %p %p\n", _mid,_mid2,_carry_mid,_result);*/\
 									\
-    SET_GPR(RC, _result);						\
+    SET_GPR(TID, RC, _result);						\
   }
 DEFINST(UMULH,			0x00,
 	"umulh",		"a,b,c",
@@ -2528,7 +2528,7 @@ DEFINST(UMULH,			0x00,
 
 #define UMULHI_IMPL							\
   {									\
-    sqword_t _v1 = GPR(RA);						\
+    sqword_t _v1 = GPR(TID, RA);						\
     sqword_t _v2 = IMM;							\
     qword_t _result;							\
     qword_t _a, _b, _c, _d;						\
@@ -2555,7 +2555,7 @@ DEFINST(UMULH,			0x00,
     _result =								\
       _ac + (_carry_mid << 32) + ((_mid2 >> 32) & LL(0xffffffff));	\
 									\
-    SET_GPR(RC, _result);						\
+    SET_GPR(TID, RC, _result);						\
   }
 DEFINST(UMULHI,			0x01,
 	"umulh",		"a,i,c",
@@ -2571,7 +2571,7 @@ CONNECT(ITFP)
   {									\
     sqword_t _longhold, _e1, _e2;					\
 									\
-    _longhold = GPR(RA) & ULL(0xffffffff);				\
+    _longhold = GPR(TID, RA) & ULL(0xffffffff);				\
 									\
     _e1 = _longhold & 0x40000000;					\
     _e2 = (_longhold >> 23) & ULL(0x7f);				\
@@ -2633,7 +2633,7 @@ DEFINST(ITOFF,			0x14,
 
 #define ITOFT_IMPL							\
   {									\
-    SET_FPR_Q(RC, GPR(RA));                                             \
+    SET_FPR_Q(RC, GPR(TID, RA));                                             \
   }
 DEFINST(ITOFT,			0x24,
 	"itoft",	        "a,C",
@@ -3040,7 +3040,7 @@ DEFINST(FETCH_M,		0xa0, /* -- Changed from 0x0a */
 #define RPCC_IMPL							\
   {									\
     /* FIXME: dumb implementation */					\
-    SET_GPR(RA, ULL(0));                                                \
+    SET_GPR(TID, RA, ULL(0));                                                \
   }
 DEFINST(RPCC,			0xc0, /* -- Changed from 0x0c */
 	"rpcc",          	"a",
@@ -3092,9 +3092,9 @@ CONNECT(JMPJSR)
 
 #define JMP_IMPL							\
   {									\
-    SET_TPC(GPR(RB) & ~3);						\
-    SET_NPC(GPR(RB) & ~3);						\
-    SET_GPR(RA, CPC + 4);						\
+    SET_TPC(GPR(TID, RB) & ~3);						\
+    SET_NPC(TID,GPR(TID, RB) & ~3);						\
+    SET_GPR(TID, RA, CPC(TID) + 4);						\
   }
 DEFINST(JMP,			0x00,
 	"jmp",			"a,(b)",
@@ -3103,9 +3103,9 @@ DEFINST(JMP,			0x00,
 
 #define JSR_IMPL							\
   {									\
-    SET_TPC(GPR(RB) & ~3);						\
-    SET_NPC(GPR(RB) & ~3);						\
-    SET_GPR(RA, CPC + 4);						\
+    SET_TPC(GPR(TID, RB) & ~3);						\
+    SET_NPC(TID,GPR(TID, RB) & ~3);						\
+    SET_GPR(TID, RA, CPC(TID) + 4);						\
   }
 DEFINST(JSR,			0x01,
 	"jsr",			"a,(b)",
@@ -3114,9 +3114,9 @@ DEFINST(JSR,			0x01,
 
 #define RETN_IMPL							\
   {									\
-    SET_TPC(GPR(RB) & ~3);						\
-    SET_NPC(GPR(RB) & ~3);						\
-    SET_GPR(RA, CPC + 4);						\
+    SET_TPC(GPR(TID, RB) & ~3);						\
+    SET_NPC(TID,GPR(TID, RB) & ~3);						\
+    SET_GPR(TID, RA, CPC(TID) + 4);						\
   }
 DEFINST(RETN,			0x02,
 	"ret",			"a,(b)",
@@ -3125,9 +3125,9 @@ DEFINST(RETN,			0x02,
 
 #define JSR_COROUTINE_IMPL						\
   {									\
-    SET_TPC(GPR(RB) & ~3);						\
-    SET_NPC(GPR(RB) & ~3);						\
-    SET_GPR(RA, CPC + 4);						\
+    SET_TPC(GPR(TID, RB) & ~3);						\
+    SET_NPC(TID,GPR(TID, RB) & ~3);						\
+    SET_GPR(TID, RA, CPC(TID) + 4);						\
   }
 DEFINST(JSR_COROUTINE,		0x03,
 	"jsr_coroutine",	"a,(b)",
@@ -3153,14 +3153,14 @@ DEFLINK(SEXTW_LINK, 0x01, "sextw_link", 12, 1)
 #define CTPOP_IMPL							\
   {									\
     int _temp, _i;							\
-    qword_t _qwordhold = GPR(RB);				        \
+    qword_t _qwordhold = GPR(TID, RB);				        \
 									\
     _temp = 0;								\
     for (_i = 0; _i <= 63; _i++)					\
       if (_qwordhold & (ULL(1) << _i))					\
 	_temp++;							\
 									\
-    SET_GPR(RC, (qword_t)_temp);					\
+    SET_GPR(TID, RC, (qword_t)_temp);					\
   }
 DEFINST(CTPOP,			0x30,  
 	"ctpop",		"b,c",
@@ -3173,8 +3173,8 @@ DEFINST(CTPOP,			0x30,
     int _i;								\
     qword_t _sum_diffs, _qwordhold_a, _qwordhold_b;			\
 									\
-    _qwordhold_a = GPR(RA);						\
-    _qwordhold_b = GPR(RB);						\
+    _qwordhold_a = GPR(TID, RA);						\
+    _qwordhold_b = GPR(TID, RB);						\
     _sum_diffs = 0;							\
 									\
     for (_i = 0; _i <= 7; _i++)						\
@@ -3189,7 +3189,7 @@ DEFINST(CTPOP,			0x30,
 	_sum_diffs += (_bytehold_b - _bytehold_a);			\
     }									\
 									\
-    SET_GPR(RC, _sum_diffs);						\
+    SET_GPR(TID, RC, _sum_diffs);						\
   }
 DEFINST(PERR,			0x31,
 	"perr",			"a,b,c",
@@ -3201,7 +3201,7 @@ DEFINST(PERR,			0x31,
 #define CTLZ_IMPL							\
   {									\
     int _temp, _i;							\
-    qword_t _qwordhold = GPR(RB);					\
+    qword_t _qwordhold = GPR(TID, RB);					\
 									\
     _temp = 0;								\
     for (_i = 63; _i >= 0; _i--)					\
@@ -3212,7 +3212,7 @@ DEFINST(PERR,			0x31,
       _temp++;								\
     }									\
 									\
-    SET_GPR(RC, (qword_t)_temp);					\
+    SET_GPR(TID, RC, (qword_t)_temp);					\
   }
 DEFINST(CTLZ,			0x32,  
 	"ctlz",		        "b,c",
@@ -3222,7 +3222,7 @@ DEFINST(CTLZ,			0x32,
 #define CTTZ_IMPL							\
   {									\
     int _temp, _i;							\
-    qword_t _qwordhold = GPR(RB);					\
+    qword_t _qwordhold = GPR(TID, RB);					\
 									\
     _temp = 0;								\
     for (_i = 0; _i <= 63; _i++)					\
@@ -3233,7 +3233,7 @@ DEFINST(CTLZ,			0x32,
       _temp++;								\
     }									\
 									\
-    SET_GPR(RC, (qword_t)_temp);					\
+    SET_GPR(TID, RC, (qword_t)_temp);					\
   }
 DEFINST(CTTZ,			0x33,  
 	"cttz",		        "b,c",
@@ -3247,14 +3247,14 @@ DEFINST(CTTZ,			0x33,
     qword_t _temp, _qwordhold;						\
 									\
     _temp = 0;								\
-    _qwordhold = GPR(RB);						\
+    _qwordhold = GPR(TID, RB);						\
 									\
     _temp |= (_qwordhold & 0xff);					\
     _temp |= (((_qwordhold >> 8) & 0xff) << 16);			\
     _temp |= (((_qwordhold >> 16) & 0xff) << 32);			\
     _temp |= (((_qwordhold >> 24) & 0xff) << 48);			\
 									\
-    SET_GPR(RC, _temp);							\
+    SET_GPR(TID, RC, _temp);							\
   }
 DEFINST(UNPKBW,			0x34,
 	"unpkbw",		"b,c",
@@ -3266,12 +3266,12 @@ DEFINST(UNPKBW,			0x34,
     qword_t _temp, _qwordhold;						\
 									\
     _temp = 0;								\
-    _qwordhold = GPR(RB);						\
+    _qwordhold = GPR(TID, RB);						\
 									\
     _temp |= (_qwordhold & 0xff);					\
     _temp |= (((_qwordhold >> 8) & 0xff) << 32);			\
 									\
-    SET_GPR(RC, _temp);							\
+    SET_GPR(TID, RC, _temp);							\
   }
 DEFINST(UNPKBL,			0x35,
 	"unpkbl",		"b,c",
@@ -3283,14 +3283,14 @@ DEFINST(UNPKBL,			0x35,
     qword_t _temp, _qwordhold;						\
 									\
     _temp = 0;								\
-    _qwordhold = GPR(RB);						\
+    _qwordhold = GPR(TID, RB);						\
 									\
     _temp |= (_qwordhold & 0xff);					\
     _temp |= (((_qwordhold >> 16) & 0xff) << 8);			\
     _temp |= (((_qwordhold >> 32) & 0xff) << 16);			\
     _temp |= (((_qwordhold >> 48) & 0xff) << 24);			\
 									\
-    SET_GPR(RC, _temp);							\
+    SET_GPR(TID, RC, _temp);							\
   }
 DEFINST(PKWB,			0x36,
 	"pkwb",			"b,c",
@@ -3302,12 +3302,12 @@ DEFINST(PKWB,			0x36,
     qword_t _temp, _qwordhold;						\
 									\
     _temp = 0;								\
-    _qwordhold = GPR(RB);						\
+    _qwordhold = GPR(TID, RB);						\
 									\
     _temp |= (_qwordhold & 0xff);					\
     _temp |= (((_qwordhold >> 32) & 0xff) << 8);			\
 									\
-    SET_GPR(RC, _temp);							\
+    SET_GPR(TID, RC, _temp);							\
   }
 DEFINST(PKLB,			0x37,
 	"pklb",			"b,c",
@@ -3335,7 +3335,7 @@ DEFLINK(MAXSW4_LINK, 0x3f, "maxsw4_link", 12, 1)
 /* FIX extensions */
 #define FTOIT_IMPL							\
   {									\
-    SET_GPR(RC, FPR_Q(RA));                                             \
+    SET_GPR(TID, RC, FPR_Q(RA));                                             \
   }
 DEFINST(FTOIT,			0x70,
 	"ftoit",	        "A,c",
@@ -3351,7 +3351,7 @@ DEFINST(FTOIT,			0x70,
     _inthold = (((_longhold >> 32) & ULL(0xc0000000))			\
 		| ((_longhold >> 29) & ULL(0x3fffffff)));		\
 									\
-    SET_GPR(RC, (SEXT32(_longhold >> 63) << 32) | _inthold);		\
+    SET_GPR(TID, RC, (SEXT32(_longhold >> 63) << 32) | _inthold);		\
   }
 DEFINST(FTOIS,			0x78,
 	"ftois",	        "A,c",
@@ -3367,8 +3367,8 @@ CONNECT(MINSB8_LINK)
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
-  _qwordhold_b = GPR(RB);						\
+  _qwordhold_a = GPR(TID, RA);						\
+  _qwordhold_b = GPR(TID, RB);						\
   _qwordhold_c = 0;							\
 									\
   for (_i = 0; _i <= 7; _i++)						\
@@ -3382,7 +3382,7 @@ CONNECT(MINSB8_LINK)
     _qwordhold_c |= (((qword_t)(byte_t)_bytehold_c & 0xff) << (_i*8));	\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MINSB8,			0x00,
 	"minsb8",		"a,b,c",
@@ -3394,7 +3394,7 @@ DEFINST(MINSB8,			0x00,
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
+  _qwordhold_a = GPR(TID, RA);						\
   _qwordhold_b = IMM;							\
   _qwordhold_c = 0;							\
 									\
@@ -3409,7 +3409,7 @@ DEFINST(MINSB8,			0x00,
     _qwordhold_c |= (((qword_t)(byte_t)_bytehold_c & 0xff) << (_i*8));	\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MINSB8I,		0x01,
 	"minsb8",		"a,i,c",
@@ -3424,8 +3424,8 @@ CONNECT(MINSW4_LINK)
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
-  _qwordhold_b = GPR(RB);						\
+  _qwordhold_a = GPR(TID, RA);						\
+  _qwordhold_b = GPR(TID, RB);						\
   _qwordhold_c = 0;							\
 									\
   for (_i = 0; _i <= 3; _i++)						\
@@ -3439,7 +3439,7 @@ CONNECT(MINSW4_LINK)
     _qwordhold_c |= (((qword_t)(half_t)_halfhold_c & 0xffff) << (_i*16));\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MINSW4,			0x00,
 	"minsw4",		"a,b,c",
@@ -3451,7 +3451,7 @@ DEFINST(MINSW4,			0x00,
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
+  _qwordhold_a = GPR(TID, RA);						\
   _qwordhold_b = IMM;							\
   _qwordhold_c = 0;							\
 									\
@@ -3466,7 +3466,7 @@ DEFINST(MINSW4,			0x00,
     _qwordhold_c |= (((qword_t)(half_t)_halfhold_c & 0xffff) << (_i*16));\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MINSW4I,		0x01,
 	"minsw4",		"a,i,c",
@@ -3481,8 +3481,8 @@ CONNECT(MINUB8_LINK)
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
-  _qwordhold_b = GPR(RB);						\
+  _qwordhold_a = GPR(TID, RA);						\
+  _qwordhold_b = GPR(TID, RB);						\
   _qwordhold_c = 0;							\
 									\
   for (_i = 0; _i <= 7; _i++)						\
@@ -3496,7 +3496,7 @@ CONNECT(MINUB8_LINK)
     _qwordhold_c |= (((qword_t)(byte_t)_bytehold_c & 0xff) << (_i*8));	\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MINUB8,			0x00,
 	"minub8",		"a,b,c",
@@ -3508,7 +3508,7 @@ DEFINST(MINUB8,			0x00,
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
+  _qwordhold_a = GPR(TID, RA);						\
   _qwordhold_b = IMM;							\
   _qwordhold_c = 0;							\
 									\
@@ -3523,7 +3523,7 @@ DEFINST(MINUB8,			0x00,
     _qwordhold_c |= (((qword_t)(byte_t)_bytehold_c & 0xff) << (_i*8));	\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MINUB8I,		0x01,
 	"minub8",		"a,i,c",
@@ -3538,8 +3538,8 @@ CONNECT(MINUW4_LINK)
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
-  _qwordhold_b = GPR(RB);						\
+  _qwordhold_a = GPR(TID, RA);						\
+  _qwordhold_b = GPR(TID, RB);						\
   _qwordhold_c = 0;							\
 									\
   for (_i = 0; _i <= 3; _i++)						\
@@ -3553,7 +3553,7 @@ CONNECT(MINUW4_LINK)
     _qwordhold_c |= (((qword_t)(half_t)_halfhold_c & 0xffff) << (_i*16));\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MINUW4,			0x00,
 	"minuw4",		"a,b,c",
@@ -3565,7 +3565,7 @@ DEFINST(MINUW4,			0x00,
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
+  _qwordhold_a = GPR(TID, RA);						\
   _qwordhold_b = IMM;							\
   _qwordhold_c = 0;							\
 									\
@@ -3580,7 +3580,7 @@ DEFINST(MINUW4,			0x00,
     _qwordhold_c |= (((qword_t)(half_t)_halfhold_c & 0xffff) << (_i*16));\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MINUW4I,		0x01,
 	"minuw4",		"a,i,c",
@@ -3595,8 +3595,8 @@ CONNECT(MAXUB8_LINK)
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
-  _qwordhold_b = GPR(RB);						\
+  _qwordhold_a = GPR(TID, RA);						\
+  _qwordhold_b = GPR(TID, RB);						\
   _qwordhold_c = 0;							\
 									\
   for (_i = 0; _i <= 7; _i++)						\
@@ -3610,7 +3610,7 @@ CONNECT(MAXUB8_LINK)
     _qwordhold_c |= (((qword_t)(byte_t)_bytehold_c & 0xff) << (_i*8));	\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MAXUB8,			0x00,
 	"maxub8",		"a,b,c",
@@ -3622,7 +3622,7 @@ DEFINST(MAXUB8,			0x00,
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
+  _qwordhold_a = GPR(TID, RA);						\
   _qwordhold_b = IMM;							\
   _qwordhold_c = 0;							\
 									\
@@ -3637,7 +3637,7 @@ DEFINST(MAXUB8,			0x00,
     _qwordhold_c |= (((qword_t)(byte_t)_bytehold_c & 0xff) << (_i*8));	\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MAXUB8I,		0x01,
 	"maxub8",		"a,i,c",
@@ -3652,8 +3652,8 @@ CONNECT(MAXUW4_LINK)
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
-  _qwordhold_b = GPR(RB);						\
+  _qwordhold_a = GPR(TID, RA);						\
+  _qwordhold_b = GPR(TID, RB);						\
   _qwordhold_c = 0;							\
 									\
   for (_i = 0; _i <= 3; _i++)						\
@@ -3667,7 +3667,7 @@ CONNECT(MAXUW4_LINK)
     _qwordhold_c |= (((qword_t)(half_t)_halfhold_c & 0xffff) << (_i*16));\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MAXUW4,			0x00,
 	"maxuw4",		"a,b,c",
@@ -3679,7 +3679,7 @@ DEFINST(MAXUW4,			0x00,
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
+  _qwordhold_a = GPR(TID, RA);						\
   _qwordhold_b = IMM;							\
   _qwordhold_c = 0;							\
 									\
@@ -3694,7 +3694,7 @@ DEFINST(MAXUW4,			0x00,
     _qwordhold_c |= (((qword_t)(half_t)_halfhold_c & 0xffff) << (_i*16));\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MAXUW4I,		0x01,
 	"maxuw4",		"a,i,c",
@@ -3709,8 +3709,8 @@ CONNECT(MAXSB8_LINK)
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
-  _qwordhold_b = GPR(RB);						\
+  _qwordhold_a = GPR(TID, RA);						\
+  _qwordhold_b = GPR(TID, RB);						\
   _qwordhold_c = 0;							\
 									\
   for (_i = 0; _i <= 7; _i++)						\
@@ -3724,7 +3724,7 @@ CONNECT(MAXSB8_LINK)
     _qwordhold_c |= (((qword_t)(byte_t)_bytehold_c & 0xff) << (_i*8));	\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MAXSB8,			0x00,
 	"maxsb8",		"a,b,c",
@@ -3736,7 +3736,7 @@ DEFINST(MAXSB8,			0x00,
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
+  _qwordhold_a = GPR(TID, RA);						\
   _qwordhold_b = IMM;							\
   _qwordhold_c = 0;							\
 									\
@@ -3751,7 +3751,7 @@ DEFINST(MAXSB8,			0x00,
     _qwordhold_c |= (((qword_t)(byte_t)_bytehold_c & 0xff) << (_i*8));	\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MAXSB8I,		0x01,
 	"maxsb8",		"a,i,c",
@@ -3766,8 +3766,8 @@ CONNECT(MAXSW4_LINK)
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
-  _qwordhold_b = GPR(RB);						\
+  _qwordhold_a = GPR(TID, RA);						\
+  _qwordhold_b = GPR(TID, RB);						\
   _qwordhold_c = 0;							\
 									\
   for (_i = 0; _i <= 3; _i++)						\
@@ -3781,7 +3781,7 @@ CONNECT(MAXSW4_LINK)
     _qwordhold_c |= (((qword_t)(half_t)_halfhold_c & 0xffff) << (_i*16));\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MAXSW4,			0x00,
 	"maxsw4",		"a,b,c",
@@ -3793,7 +3793,7 @@ DEFINST(MAXSW4,			0x00,
   int _i;								\
   qword_t _qwordhold_a, _qwordhold_b, _qwordhold_c;			\
 									\
-  _qwordhold_a = GPR(RA);						\
+  _qwordhold_a = GPR(TID, RA);						\
   _qwordhold_b = IMM;							\
   _qwordhold_c = 0;							\
 									\
@@ -3808,7 +3808,7 @@ DEFINST(MAXSW4,			0x00,
     _qwordhold_c |= (((qword_t)(half_t)_halfhold_c & 0xffff) << (_i*16));\
   }									\
 									\
-  SET_GPR(RC, _qwordhold_c);						\
+  SET_GPR(TID, RC, _qwordhold_c);						\
 }
 DEFINST(MAXSW4I,		0x01,
 	"maxsw4",		"a,i,c",
@@ -3822,7 +3822,7 @@ CONNECT(SEXTB_LINK)
 /* EV56 BWX extension... */
 #define SEXTB_IMPL							\
   {									\
-    SET_GPR(RC, (qword_t)(sqword_t)(sbyte_t)(GPR(RB) & 0xff));		\
+    SET_GPR(TID, RC, (qword_t)(sqword_t)(sbyte_t)(GPR(TID, RB) & 0xff));		\
   }
 DEFINST(SEXTB,			0x00,
 	"sextb",		"b,c",
@@ -3832,7 +3832,7 @@ DEFINST(SEXTB,			0x00,
 /* EV56 BWX extension... */
 #define SEXTBI_IMPL							\
   {									\
-    SET_GPR(RC, (qword_t)(sqword_t)(sbyte_t)(IMM & 0xff));		\
+    SET_GPR(TID, RC, (qword_t)(sqword_t)(sbyte_t)(IMM & 0xff));		\
   }
 DEFINST(SEXTBI,			0x01,
 	"sextb",		"i,c",
@@ -3846,7 +3846,7 @@ CONNECT(SEXTW_LINK)
 /* EV56 BWX extension... */
 #define SEXTW_IMPL							\
   {									\
-    SET_GPR(RC, (qword_t)(sqword_t)(shalf_t)(GPR(RB) & 0xffff));	\
+    SET_GPR(TID, RC, (qword_t)(sqword_t)(shalf_t)(GPR(TID, RB) & 0xffff));	\
   }
 DEFINST(SEXTW,			0x00,
 	"sextw",		"b,c",
@@ -3856,7 +3856,7 @@ DEFINST(SEXTW,			0x00,
 /* EV56 BWX extension... */
 #define SEXTWI_IMPL							\
   {									\
-    SET_GPR(RC, (qword_t)(sqword_t)(shalf_t)(IMM & 0xffff));		\
+    SET_GPR(TID, RC, (qword_t)(sqword_t)(shalf_t)(IMM & 0xffff));		\
   }
 DEFINST(SEXTWI,			0x01,
 	"sextw",		"i,c",

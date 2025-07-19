@@ -3424,27 +3424,27 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
  */
 
 /* next program counter */
-#define SET_NPC(EXPR)           (regs.regs_NPC = (EXPR))
+#define SET_NPC(TID,EXPR)           (regs[TID].regs_NPC = (EXPR))
 
 /* target program counter */
 #undef  SET_TPC
 #define SET_TPC(EXPR)		(target_PC = (EXPR))
 
 /* current program counter */
-#define CPC                     (regs.regs_PC)
-#define SET_CPC(EXPR)           (regs.regs_PC = (EXPR))
+#define CPC(TID)                     (regs[TID].regs_PC)
+#define SET_CPC(TID,EXPR)           (regs[TID].regs_PC = (EXPR))
 
 /* general purpose register accessors, NOTE: speculative copy on write storage
    provided for fast recovery during wrong path execute (see tracer_recover()
    for details on this process */
-#define GPR(N)                  (BITMAP_SET_P(use_spec_R, R_BMAP_SZ, (N))\
+#define GPR(TID, N)                  (BITMAP_SET_P(use_spec_R, R_BMAP_SZ, (N))\
 				 ? spec_regs_R[N]                       \
-				 : regs.regs_R[N])
-#define SET_GPR(N,EXPR)         (spec_mode				\
+				 : regs[TID].regs_R[N])
+#define SET_GPR(TID,N,EXPR)         (spec_mode				\
 				 ? ((spec_regs_R[N] = (EXPR)),		\
 				    BITMAP_SET(use_spec_R, R_BMAP_SZ, (N)),\
 				    spec_regs_R[N])			\
-				 : (regs.regs_R[N] = (EXPR)))
+				 : (regs[TID].regs_R[N] = (EXPR)))
 
 #if defined(TARGET_PISA)
 
@@ -3453,56 +3453,56 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
    for details on this process */
 #define FPR_L(N)                (BITMAP_SET_P(use_spec_F, F_BMAP_SZ, ((N)&~1))\
 				 ? spec_regs_F.l[(N)]                   \
-				 : regs.regs_F.l[(N)])
+				 : regs[TID].regs_F.l[(N)])
 #define SET_FPR_L(N,EXPR)       (spec_mode				\
 				 ? ((spec_regs_F.l[(N)] = (EXPR)),	\
 				    BITMAP_SET(use_spec_F,F_BMAP_SZ,((N)&~1)),\
 				    spec_regs_F.l[(N)])			\
-				 : (regs.regs_F.l[(N)] = (EXPR)))
+				 : (regs[TID].regs_F.l[(N)] = (EXPR)))
 #define FPR_F(N)                (BITMAP_SET_P(use_spec_F, F_BMAP_SZ, ((N)&~1))\
 				 ? spec_regs_F.f[(N)]                   \
-				 : regs.regs_F.f[(N)])
+				 : regs[TID].regs_F.f[(N)])
 #define SET_FPR_F(N,EXPR)       (spec_mode				\
 				 ? ((spec_regs_F.f[(N)] = (EXPR)),	\
 				    BITMAP_SET(use_spec_F,F_BMAP_SZ,((N)&~1)),\
 				    spec_regs_F.f[(N)])			\
-				 : (regs.regs_F.f[(N)] = (EXPR)))
+				 : (regs[TID].regs_F.f[(N)] = (EXPR)))
 #define FPR_D(N)                (BITMAP_SET_P(use_spec_F, F_BMAP_SZ, ((N)&~1))\
 				 ? spec_regs_F.d[(N) >> 1]              \
-				 : regs.regs_F.d[(N) >> 1])
+				 : regs[TID].regs_F.d[(N) >> 1])
 #define SET_FPR_D(N,EXPR)       (spec_mode				\
 				 ? ((spec_regs_F.d[(N) >> 1] = (EXPR)),	\
 				    BITMAP_SET(use_spec_F,F_BMAP_SZ,((N)&~1)),\
 				    spec_regs_F.d[(N) >> 1])		\
-				 : (regs.regs_F.d[(N) >> 1] = (EXPR)))
+				 : (regs[TID].regs_F.d[(N) >> 1] = (EXPR)))
 
 /* miscellanous register accessors, NOTE: speculative copy on write storage
    provided for fast recovery during wrong path execute (see tracer_recover()
    for details on this process */
 #define HI			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ, /*hi*/0)\
 				 ? spec_regs_C.hi			\
-				 : regs.regs_C.hi)
+				 : regs[TID].regs_C.hi)
 #define SET_HI(EXPR)		(spec_mode				\
 				 ? ((spec_regs_C.hi = (EXPR)),		\
 				    BITMAP_SET(use_spec_C, C_BMAP_SZ,/*hi*/0),\
 				    spec_regs_C.hi)			\
-				 : (regs.regs_C.hi = (EXPR)))
+				 : (regs[TID].regs_C.hi = (EXPR)))
 #define LO			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ, /*lo*/1)\
 				 ? spec_regs_C.lo			\
-				 : regs.regs_C.lo)
+				 : regs[TID].regs_C.lo)
 #define SET_LO(EXPR)		(spec_mode				\
 				 ? ((spec_regs_C.lo = (EXPR)),		\
 				    BITMAP_SET(use_spec_C, C_BMAP_SZ,/*lo*/1),\
 				    spec_regs_C.lo)			\
-				 : (regs.regs_C.lo = (EXPR)))
+				 : (regs[TID].regs_C.lo = (EXPR)))
 #define FCC			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fcc*/2)\
 				 ? spec_regs_C.fcc			\
-				 : regs.regs_C.fcc)
+				 : regs[TID].regs_C.fcc)
 #define SET_FCC(EXPR)		(spec_mode				\
 				 ? ((spec_regs_C.fcc = (EXPR)),		\
 				    BITMAP_SET(use_spec_C,C_BMAP_SZ,/*fcc*/2),\
 				    spec_regs_C.fcc)			\
-				 : (regs.regs_C.fcc = (EXPR)))
+				 : (regs[TID].regs_C.fcc = (EXPR)))
 
 #elif defined(TARGET_ALPHA)
 
@@ -3511,48 +3511,48 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
    for details on this process */
 #define FPR_Q(N)		(BITMAP_SET_P(use_spec_F, F_BMAP_SZ, (N))\
 				 ? spec_regs_F.q[(N)]                   \
-				 : regs.regs_F.q[(N)])
+				 : regs[TID].regs_F.q[(N)])
 #define SET_FPR_Q(N,EXPR)	(spec_mode				\
 				 ? ((spec_regs_F.q[(N)] = (EXPR)),	\
 				    BITMAP_SET(use_spec_F,F_BMAP_SZ, (N)),\
 				    spec_regs_F.q[(N)])			\
-				 : (regs.regs_F.q[(N)] = (EXPR)))
+				 : (regs[TID].regs_F.q[(N)] = (EXPR)))
 #define FPR(N)			(BITMAP_SET_P(use_spec_F, F_BMAP_SZ, (N))\
 				 ? spec_regs_F.d[(N)]			\
-				 : regs.regs_F.d[(N)])
+				 : regs[TID].regs_F.d[(N)])
 #define SET_FPR(N,EXPR)		(spec_mode				\
 				 ? ((spec_regs_F.d[(N)] = (EXPR)),	\
 				    BITMAP_SET(use_spec_F,F_BMAP_SZ, (N)),\
 				    spec_regs_F.d[(N)])			\
-				 : (regs.regs_F.d[(N)] = (EXPR)))
+				 : (regs[TID].regs_F.d[(N)] = (EXPR)))
 
 /* miscellanous register accessors, NOTE: speculative copy on write storage
    provided for fast recovery during wrong path execute (see tracer_recover()
    for details on this process */
 #define FPCR			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fpcr*/0)\
 				 ? spec_regs_C.fpcr			\
-				 : regs.regs_C.fpcr)
+				 : regs[TID].regs_C.fpcr)
 #define SET_FPCR(EXPR)		(spec_mode				\
 				 ? ((spec_regs_C.fpcr = (EXPR)),	\
 				   BITMAP_SET(use_spec_C,C_BMAP_SZ,/*fpcr*/0),\
 				    spec_regs_C.fpcr)			\
-				 : (regs.regs_C.fpcr = (EXPR)))
+				 : (regs[TID].regs_C.fpcr = (EXPR)))
 #define UNIQ			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*uniq*/1)\
 				 ? spec_regs_C.uniq			\
-				 : regs.regs_C.uniq)
+				 : regs[TID].regs_C.uniq)
 #define SET_UNIQ(EXPR)		(spec_mode				\
 				 ? ((spec_regs_C.uniq = (EXPR)),	\
 				   BITMAP_SET(use_spec_C,C_BMAP_SZ,/*uniq*/1),\
 				    spec_regs_C.uniq)			\
-				 : (regs.regs_C.uniq = (EXPR)))
+				 : (regs[TID].regs_C.uniq = (EXPR)))
 #define FCC			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fcc*/2)\
 				 ? spec_regs_C.fcc			\
-				 : regs.regs_C.fcc)
+				 : regs[TID].regs_C.fcc)
 #define SET_FCC(EXPR)		(spec_mode				\
 				 ? ((spec_regs_C.fcc = (EXPR)),		\
 				    BITMAP_SET(use_spec_C,C_BMAP_SZ,/*fcc*/1),\
 				    spec_regs_C.fcc)			\
-				 : (regs.regs_C.fcc = (EXPR)))
+				 : (regs[TID].regs_C.fcc = (EXPR)))
 
 #else
 #error No ISA target defined...
