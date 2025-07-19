@@ -306,9 +306,10 @@ OBJS =	main.$(OEXT) syscall.$(OEXT) memory.$(OEXT) regs.$(OEXT) \
 #
 # programs to build
 #
-PROGS = sim-fast$(EEXT) sim-safe$(EEXT) sim-eio$(EEXT) \
-	sim-bpred$(EEXT) sim-profile$(EEXT) \
-	sim-cache$(EEXT) sim-outorder$(EEXT) # sim-cheetah$(EEXT)
+# PROGS = sim-fast$(EEXT) sim-safe$(EEXT) sim-eio$(EEXT) \
+# 	sim-bpred$(EEXT) sim-profile$(EEXT) \
+# 	sim-cache$(EEXT) sim-outorder$(EEXT) # sim-cheetah$(EEXT)
+PROGS = sim-smt$(EEXT)
 
 #
 # all targets, NOTE: library ordering is important...

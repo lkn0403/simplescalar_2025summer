@@ -2123,29 +2123,29 @@ cv_init(void)
   }
   }
 
-/* dump the contents of the create vector */
-static void
-cv_dump(FILE *stream)				/* output stream */
-{
-  int i;
-  struct CV_link ent;
+// /* dump the contents of the create vector */
+// static void
+// cv_dump(FILE *stream)				/* output stream */
+// {
+//   int i;
+//   struct CV_link ent;
 
-  if (!stream)
-    stream = stderr;
+//   if (!stream)
+//     stream = stderr;
 
-  fprintf(stream, "** create vector state **\n");
+//   fprintf(stream, "** create vector state **\n");
 
-  for (i=0; i < MD_TOTAL_REGS; i++)
-    {
-      ent = CREATE_VECTOR(i);
-      if (!ent.rs)
-	fprintf(stream, "[cv%02d]: from architected reg file\n", i);
-      else
-	fprintf(stream, "[cv%02d]: from %s, idx: %d\n",
-		i, (ent.rs->in_LSQ ? "LSQ" : "RUU"),
-		(int)(ent.rs - (ent.rs->in_LSQ ? LSQ : RUU)));
-    }
-}
+//   for (i=0; i < MD_TOTAL_REGS; i++)
+//     {
+//       ent = CREATE_VECTOR(i);
+//       if (!ent.rs)
+// 	fprintf(stream, "[cv%02d]: from architected reg file\n", i);
+//       else
+// 	fprintf(stream, "[cv%02d]: from %s, idx: %d\n",
+// 		i, (ent.rs->in_LSQ ? "LSQ" : "RUU"),
+// 		(int)(ent.rs - (ent.rs->in_LSQ ? LSQ : RUU)));
+//     }
+// }
 
 
 /*
@@ -2397,7 +2397,7 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
  */
 
 /* forward declarations */
-static void tracer_recover(void);
+// static void tracer_recover(void);
 
 /* writeback completed operation results from the functional units to RUU,
    at this point, the output dependency chains of completing instructions
@@ -2981,57 +2981,57 @@ static int fetch_tail, fetch_head;	/* head and tail pointers of queue */
    before the first mis-predicted branch; this is accomplished by resetting
    all register value copied-on-write bitmasks are reset, and the speculative
    memory hash table is cleared */
-static void
-tracer_recover(int tid)
-{
-  int i;
-  struct spec_mem_ent *ent, *ent_next;
+// static void
+// tracer_recover(int tid)
+// {
+//   int i;
+//   struct spec_mem_ent *ent, *ent_next;
 
-  /* better be in mis-speculative trace generation mode */
-  if (!spec_mode)
-    panic("cannot recover unless in speculative mode");
+//   /* better be in mis-speculative trace generation mode */
+//   if (!spec_mode)
+//     panic("cannot recover unless in speculative mode");
 
-  /* reset to non-speculative trace generation mode */
-  spec_mode = FALSE;
+//   /* reset to non-speculative trace generation mode */
+//   spec_mode = FALSE;
 
-  /* reset copied-on-write register bitmasks back to non-speculative state */
-  BITMAP_CLEAR_MAP(use_spec_R, R_BMAP_SZ);
-  BITMAP_CLEAR_MAP(use_spec_F, F_BMAP_SZ);
-  BITMAP_CLEAR_MAP(use_spec_C, C_BMAP_SZ);
+//   /* reset copied-on-write register bitmasks back to non-speculative state */
+//   BITMAP_CLEAR_MAP(use_spec_R, R_BMAP_SZ);
+//   BITMAP_CLEAR_MAP(use_spec_F, F_BMAP_SZ);
+//   BITMAP_CLEAR_MAP(use_spec_C, C_BMAP_SZ);
 
-  /* reset memory state back to non-speculative state */
-  /* FIXME: could version stamps be used here?!?!? */
-  for (i=0; i<STORE_HASH_SIZE; i++)
-    {
-      /* release all hash table buckets */
-      for (ent=store_htable[i]; ent; ent=ent_next)
-	{
-	  ent_next = ent->next;
-	  ent->next = bucket_free_list;
-	  bucket_free_list = ent;
-	}
-      store_htable[i] = NULL;
-    }
+//   /* reset memory state back to non-speculative state */
+//   /* FIXME: could version stamps be used here?!?!? */
+//   for (i=0; i<STORE_HASH_SIZE; i++)
+//     {
+//       /* release all hash table buckets */
+//       for (ent=store_htable[i]; ent; ent=ent_next)
+// 	{
+// 	  ent_next = ent->next;
+// 	  ent->next = bucket_free_list;
+// 	  bucket_free_list = ent;
+// 	}
+//       store_htable[i] = NULL;
+//     }
 
-  /* if pipetracing, indicate squash of instructions in the inst fetch queue */
-  if (ptrace_active)
-    {
-      while (fetch_num != 0)
-	{
-	  /* squash the next instruction from the IFETCH -> DISPATCH queue */
-	  ptrace_endinst(fetch_data[fetch_head].ptrace_seq);
+//   /* if pipetracing, indicate squash of instructions in the inst fetch queue */
+//   if (ptrace_active)
+//     {
+//       while (fetch_num != 0)
+// 	{
+// 	  /* squash the next instruction from the IFETCH -> DISPATCH queue */
+// 	  ptrace_endinst(fetch_data[fetch_head].ptrace_seq);
 
-	  /* consume instruction from IFETCH -> DISPATCH queue */
-	  fetch_head = (fetch_head+1) & (ruu_ifq_size - 1);
-	  fetch_num--;
-	}
-    }
+// 	  /* consume instruction from IFETCH -> DISPATCH queue */
+// 	  fetch_head = (fetch_head+1) & (ruu_ifq_size - 1);
+// 	  fetch_num--;
+// 	}
+//     }
 
-  /* reset IFETCH state */
-  fetch_num = 0;
-  fetch_tail = fetch_head = 0;
-  fetch_pred_PC = fetch_regs_PC = recover_PC;
-}
+//   /* reset IFETCH state */
+//   fetch_num = 0;
+//   fetch_tail = fetch_head = 0;
+//   fetch_pred_PC = fetch_regs_PC = recover_PC;
+// }
 
 /* initialize the speculative instruction state generator state */
 static void
@@ -3603,122 +3603,122 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
    (spec_mode ? panic("speculative syscall") : (void) 0),		\
    sys_syscall(&regs, mem_access, mem, INST, TRUE))
 
-/* default register state accessor, used by DLite */
-static char *					/* err str, NULL for no err */
-simoo_reg_obj(struct regs_t *xregs,		/* registers to access */
-	      int is_write,			/* access type */
-	      enum md_reg_type rt,		/* reg bank to probe */
-	      int reg,				/* register number */
-	      struct eval_value_t *val)		/* input, output */
-{
-  switch (rt)
-    {
-    case rt_gpr:
-      if (reg < 0 || reg >= MD_NUM_IREGS)
-	return "register number out of range";
+// /* default register state accessor, used by DLite */
+// static char *					/* err str, NULL for no err */
+// simoo_reg_obj(struct regs_t *xregs,		/* registers to access */
+// 	      int is_write,			/* access type */
+// 	      enum md_reg_type rt,		/* reg bank to probe */
+// 	      int reg,				/* register number */
+// 	      struct eval_value_t *val)		/* input, output */
+// {
+//   switch (rt)
+//     {
+//     case rt_gpr:
+//       if (reg < 0 || reg >= MD_NUM_IREGS)
+// 	return "register number out of range";
 
-      if (!is_write)
-	{
-	  val->type = et_uint;
-	  val->value.as_uint = GPR(reg);
-	}
-      else
-	SET_GPR(reg, eval_as_uint(*val));
-      break;
+//       if (!is_write)
+// 	{
+// 	  val->type = et_uint;
+// 	  val->value.as_uint = GPR(reg);
+// 	}
+//       else
+// 	SET_GPR(reg, eval_as_uint(*val));
+//       break;
 
-    case rt_lpr:
-      if (reg < 0 || reg >= MD_NUM_FREGS)
-	return "register number out of range";
+//     case rt_lpr:
+//       if (reg < 0 || reg >= MD_NUM_FREGS)
+// 	return "register number out of range";
 
-      /* FIXME: this is not portable... */
-      abort();
-#if 0
-      if (!is_write)
-	{
-	  val->type = et_uint;
-	  val->value.as_uint = FPR_L(reg);
-	}
-      else
-	SET_FPR_L(reg, eval_as_uint(*val));
-#endif
-      break;
+//       /* FIXME: this is not portable... */
+//       abort();
+// #if 0
+//       if (!is_write)
+// 	{
+// 	  val->type = et_uint;
+// 	  val->value.as_uint = FPR_L(reg);
+// 	}
+//       else
+// 	SET_FPR_L(reg, eval_as_uint(*val));
+// #endif
+//       break;
 
-    case rt_fpr:
-      /* FIXME: this is not portable... */
-      abort();
-#if 0
-      if (!is_write)
-	val->value.as_float = FPR_F(reg);
-      else
-	SET_FPR_F(reg, val->value.as_float);
-#endif
-      break;
+//     case rt_fpr:
+//       /* FIXME: this is not portable... */
+//       abort();
+// #if 0
+//       if (!is_write)
+// 	val->value.as_float = FPR_F(reg);
+//       else
+// 	SET_FPR_F(reg, val->value.as_float);
+// #endif
+//       break;
 
-    case rt_dpr:
-      /* FIXME: this is not portable... */
-      abort();
-#if 0
-      /* 1/2 as many regs in this mode */
-      if (reg < 0 || reg >= MD_NUM_REGS/2)
-	return "register number out of range";
+//     case rt_dpr:
+//       /* FIXME: this is not portable... */
+//       abort();
+// #if 0
+//       /* 1/2 as many regs in this mode */
+//       if (reg < 0 || reg >= MD_NUM_REGS/2)
+// 	return "register number out of range";
 
-      if (at == at_read)
-	val->as_double = FPR_D(reg * 2);
-      else
-	SET_FPR_D(reg * 2, val->as_double);
-#endif
-      break;
+//       if (at == at_read)
+// 	val->as_double = FPR_D(reg * 2);
+//       else
+// 	SET_FPR_D(reg * 2, val->as_double);
+// #endif
+//       break;
 
-      /* FIXME: this is not portable... */
-#if 0
-      abort();
-    case rt_hi:
-      if (at == at_read)
-	val->as_word = HI;
-      else
-	SET_HI(val->as_word);
-      break;
-    case rt_lo:
-      if (at == at_read)
-	val->as_word = LO;
-      else
-	SET_LO(val->as_word);
-      break;
-    case rt_FCC:
-      if (at == at_read)
-	val->as_condition = FCC;
-      else
-	SET_FCC(val->as_condition);
-      break;
-#endif
+//       /* FIXME: this is not portable... */
+// #if 0
+//       abort();
+//     case rt_hi:
+//       if (at == at_read)
+// 	val->as_word = HI;
+//       else
+// 	SET_HI(val->as_word);
+//       break;
+//     case rt_lo:
+//       if (at == at_read)
+// 	val->as_word = LO;
+//       else
+// 	SET_LO(val->as_word);
+//       break;
+//     case rt_FCC:
+//       if (at == at_read)
+// 	val->as_condition = FCC;
+//       else
+// 	SET_FCC(val->as_condition);
+//       break;
+// #endif
 
-    case rt_PC:
-      if (!is_write)
-	{
-	  val->type = et_addr;
-	  val->value.as_addr = regs.regs_PC;
-	}
-      else
-	regs.regs_PC = eval_as_addr(*val);
-      break;
+//     case rt_PC:
+//       if (!is_write)
+// 	{
+// 	  val->type = et_addr;
+// 	  val->value.as_addr = regs.regs_PC;
+// 	}
+//       else
+// 	regs.regs_PC = eval_as_addr(*val);
+//       break;
 
-    case rt_NPC:
-      if (!is_write)
-	{
-	  val->type = et_addr;
-	  val->value.as_addr = regs.regs_NPC;
-	}
-      else
-	regs.regs_NPC = eval_as_addr(*val);
-      break;
+//     case rt_NPC:
+//       if (!is_write)
+// 	{
+// 	  val->type = et_addr;
+// 	  val->value.as_addr = regs.regs_NPC;
+// 	}
+//       else
+// 	regs.regs_NPC = eval_as_addr(*val);
+//       break;
 
-    default:
-      panic("bogus register bank");
-    }
+//     default:
+//       panic("bogus register bank");
+//     }
 
-  /* no error */
-  return NULL;
-}
+//   /* no error */
+//   return NULL;
+// }
 
 /* the last operation that ruu_dispatch() attempted to dispatch, for
    implementing in-order issue */
@@ -3829,7 +3829,7 @@ ruu_dispatch(void)
 	  out1 = O1; out2 = O2;						\
 	  in1 = I1; in2 = I2; in3 = I3;					\
 	  /* execute the instruction */					\
-	  SYMCAT(OP,_IMPL);						\
+	  SYMCAT(OP,_IMPL(tid));						\
 	  break;
 #define DEFLINK(OP,MSK,NAME,MASK,SHIFT)					\
 	case OP:							\
@@ -4526,7 +4526,7 @@ sim_main(void)
 	    {
 #define DEFINST(OP,MSK,NAME,OPFORM,RES,FLAGS,O1,O2,I1,I2,I3)		\
 	    case OP:							\
-	      SYMCAT(OP,_IMPL);						\
+	      SYMCAT(OP,_IMPL(tid));						\
 	      break;
 #define DEFLINK(OP,MSK,NAME,MASK,SHIFT)					\
 	    case OP:							\
