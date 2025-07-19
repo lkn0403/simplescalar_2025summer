@@ -293,19 +293,18 @@ main(int argc, char **argv, char **envp)
 
   /* register all simulator-specific options */
   sim_reg_options(sim_odb);
-
   /* parse simulator options */
   exec_index = -1;
   opt_process_options(sim_odb, argc, argv);
-  if (exec_index == -1) {
+  if (exec_index != -1) {
     thread_num = 1;
   } else {
-    for (int index = 0; index < argc; index++) {
+    for (int index = 1; index < argc; index++) {
       if (!strcmp(argv[index], "--")) {
         exec_start[thread_num] = ++index;
         while (index < argc && strcmp(argv[index], "--"))
           index++;
-        exec_end[thread_num] = index;
+        exec_end[thread_num] = index--;
         thread_num++;
       }
     }
@@ -396,8 +395,9 @@ main(int argc, char **argv, char **envp)
 
   /* initialize architected state */
   for (int index = 0; index < thread_num; index++) {
+    fprintf(stderr, "load program: %s\n", argv[exec_start[index]]);
     sim_load_prog_smt(index, argv[exec_start[index]], exec_end[index] - exec_start[index],
-        argv + exec_start[index], index, envp);
+        argv + exec_start[index], envp);
   }
 
   /* register all simulator stats */

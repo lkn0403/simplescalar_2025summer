@@ -172,10 +172,10 @@
  *		    READ_UNSIGNED_BYTE(A) - read unsigned byte from address A
  *		    READ_SIGNED_HALF(A)   - read signed half from address A
  *		    READ_UNSIGNED_HALF(A) - read unsigned half from address A
- *		    READ_WORD(A)          - read word from address A
- *		    WRITE_BYTE(E,A)       - write byte value E to address A
- *		    WRITE_HALF(E,A)       - write half value E to address A
- *		    WRITE_WORD(E,A)       - write word value E to address A
+ *		    READ_WORD(TID, A)          - read word from address A
+ *		    WRITE_BYTE(TID, E,A)       - write byte value E to address A
+ *		    WRITE_HALF(TID, E,A)       - write half value E to address A
+ *		    WRITE_WORD(TID, E,A)       - write word value E to address A
  *
  *		  Finally, the following helper functions are available to
  *		  assist in the construction of instruction expressions:
@@ -223,7 +223,7 @@ DEFINST(LDAH,			0x09,
     byte_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_BYTE(GPR(TID, RB) + SEXT(OFS), _fault);			\
+    _result = READ_BYTE(TID, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -239,7 +239,7 @@ DEFINST(LDBU,			0x0a,
     qword_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_QWORD((GPR(TID, RB) + SEXT(OFS)) & ~7, _fault);		\
+    _result = READ_QWORD(TID, (GPR(TID, RB) + SEXT(OFS)) & ~7, _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -256,7 +256,7 @@ DEFINST(LDQ_U,			0x0b,
     half_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_HALF(GPR(TID, RB) + SEXT(OFS), _fault);			\
+    _result = READ_HALF(TID, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -272,7 +272,7 @@ DEFINST(LDWU,			0x0c,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_HALF((half_t)GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
+    WRITE_HALF(TID, (half_t)GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -286,7 +286,7 @@ DEFINST(STW,			0x0d,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_BYTE((byte_t)GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
+    WRITE_BYTE(TID, (byte_t)GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -299,7 +299,7 @@ DEFINST(STB,			0x0e,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_QWORD(GPR(TID, RA), (GPR(TID, RB) + SEXT(OFS)) & ~7, _fault);		\
+    WRITE_QWORD(TID, GPR(TID, RA), (GPR(TID, RB) + SEXT(OFS)) & ~7, _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -370,7 +370,7 @@ DEFINST(LDG,			0x21,
     sqword_t _longhold, _e1, _e2;					\
     enum md_fault_type _fault;						\
 									\
-    _longhold = READ_WORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
+    _longhold = READ_WORD(TID, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -403,7 +403,7 @@ DEFINST(LDS,			0x22,
     qword_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_QWORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
+    _result = READ_QWORD(TID, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -443,7 +443,7 @@ DEFINST(STG,			0x25,
     _longhold = FPR_Q(TID, RA);						\
     _inthold = (((_longhold >> 32) & ULL(0xc0000000))			\
 		| ((_longhold >> 29) & ULL(0x3fffffff)));		\
-    WRITE_WORD(_inthold, GPR(TID, RB) + SEXT(OFS), _fault);			\
+    WRITE_WORD(TID, _inthold, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -456,7 +456,7 @@ DEFINST(STS,			0x26,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_QWORD(FPR_Q(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
+    WRITE_QWORD(TID, FPR_Q(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);		\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -470,7 +470,7 @@ DEFINST(STT,			0x27,
     word_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_WORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
+    _result = READ_WORD(TID, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -486,7 +486,7 @@ DEFINST(LDL,			0x28,
     qword_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_QWORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
+    _result = READ_QWORD(TID, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -503,7 +503,7 @@ DEFINST(LDQ,			0x29,
     word_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_WORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
+    _result = READ_WORD(TID, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -520,7 +520,7 @@ DEFINST(LDL_L,			0x2a,
     qword_t _result;							\
     enum md_fault_type _fault;						\
 									\
-    _result = READ_QWORD(GPR(TID, RB) + SEXT(OFS), _fault);			\
+    _result = READ_QWORD(TID, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
 									\
@@ -537,7 +537,7 @@ DEFINST(LDQ_L,			0x2b,
     enum md_fault_type _fault;						\
 									\
     _src = (word_t)(GPR(TID, RA) & ULL(0xffffffff));				\
-    WRITE_WORD(_src, GPR(TID, RB) + SEXT(OFS), _fault);			\
+    WRITE_WORD(TID, _src, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -550,7 +550,7 @@ DEFINST(STL,			0x2c,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_QWORD(GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);			\
+    WRITE_QWORD(TID, GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -566,7 +566,7 @@ DEFINST(STQ,			0x2d,
     enum md_fault_type _fault;						\
 									\
     _src = (word_t)(GPR(TID, RA) & ULL(0xffffffff));				\
-    WRITE_WORD(_src, GPR(TID, RB) + SEXT(OFS), _fault);			\
+    WRITE_WORD(TID, _src, GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -580,7 +580,7 @@ DEFINST(STL_C,			0x2e,
   {									\
     enum md_fault_type _fault;						\
 									\
-    WRITE_QWORD(GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);			\
+    WRITE_QWORD(TID, GPR(TID, RA), GPR(TID, RB) + SEXT(OFS), _fault);			\
     if (_fault != md_fault_none)					\
       DECLARE_FAULT(_fault);						\
   }
@@ -772,7 +772,7 @@ CONNECT(CALL_PAL)
 
 #define PAL_CALLSYS_IMPL(TID)						\
   {									\
-    SYSCALL(inst);							\
+    SYSCALL(TID, inst);							\
   }
 DEFINST(PAL_CALLSYS,		0x83,
 	"call_pal callsys",	"",

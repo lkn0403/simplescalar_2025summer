@@ -206,7 +206,7 @@ ident_evaluator(struct eval_state_t *es)	/* expression evaluator */
       if (!mystricmp(es->tok_buf, md_reg_names[i].str))
 	{
 	  err_str =
-	    f_dlite_reg_obj[current_dlite_tid](local_regs, /* !is_write */FALSE,
+	    f_dlite_reg_obj[current_dlite_tid](current_dlite_tid, local_regs, /* !is_write */FALSE,
 			    md_reg_names[i].file, md_reg_names[i].reg, &val);
 	  if (err_str)
 	    {
@@ -1091,7 +1091,7 @@ dlite_cont(int nargs, union arg_val_t args[],	/* command arguments */
       /* reset PC */
       val.type = et_addr;
       val.value.as_addr = eval_as_addr(args[0].as_value);
-      f_dlite_reg_obj[current_dlite_tid](regs, /* is_write */TRUE, rt_PC, 0, &val);
+      f_dlite_reg_obj[current_dlite_tid](current_dlite_tid, regs, /* is_write */TRUE, rt_PC, 0, &val);
 
       myfprintf(stdout, "DLite: continuing execution @ 0x%08p...\n",
 		val.value.as_addr);

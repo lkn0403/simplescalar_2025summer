@@ -121,7 +121,8 @@
 /* DLite register access function, the debugger uses this function to access
    simulator register state */
 typedef char *					/* error str, NULL if none */
-(*dlite_reg_obj_t)(struct regs_t *regs,		/* registers to access */
+(*dlite_reg_obj_t)(int tid,
+			struct regs_t *regs,		/* registers to access */
 		   int is_write,		/* access type */
 		   enum md_reg_type rt,		/* reg bank to access */
 		   int reg,			/* register number */

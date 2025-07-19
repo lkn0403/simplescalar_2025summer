@@ -544,6 +544,7 @@ il2_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
 /* inst cache block miss handler function */
 static unsigned int			/* latency of block access */
 itlb_access_fn(enum mem_cmd cmd,	/* access cmd, Read or Write */
+         int tid,
 	       md_addr_t baddr,		/* block address to access */
 	       int bsize,		/* size of block to access */
 	       struct cache_blk_t *blk,	/* ptr to block in upper level */
@@ -564,6 +565,7 @@ itlb_access_fn(enum mem_cmd cmd,	/* access cmd, Read or Write */
 /* data cache block miss handler function */
 static unsigned int			/* latency of block access */
 dtlb_access_fn(enum mem_cmd cmd,	/* access cmd, Read or Write */
+         int tid,
 	       md_addr_t baddr,	/* block address to access */
 	       int bsize,		/* size of block to access */
 	       struct cache_blk_t *blk,	/* ptr to block in upper level */
@@ -1362,7 +1364,8 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
 					/* print fn */NULL);
     }
   ld_reg_stats(sdb);
-  mem_reg_stats(mem, sdb);
+  for (int index = 0; index < thread_num; index++)
+    mem_reg_stats(mem[index], sdb);
 }
 
 /* forward declarations */
@@ -1429,13 +1432,13 @@ simoo_mstate_obj(FILE *stream,			/* output stream */
 /* load program into simulated state */
 void
 sim_load_prog_smt(int tid, char *fname,		/* program to load */
-	      int argc, char **argv, int index,	/* program arguments */
+	      int argc, char **argv, /* program arguments */
 	      char **envp)		/* program environment */
 {
   /* load program text and data, set up environment, memory, and regs */
-  ld_load_prog(fname, argc, argv, envp, &regs[index], mem[index], TRUE);
+  ld_load_prog(fname, argc, argv, envp, &regs[tid], mem[tid], TRUE);
 
-  if (!index) {
+  if (!tid) {
     /* initialize here, so symbols can be loaded */
     if (ptrace_nelt == 2)
       {
@@ -3564,47 +3567,47 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 /* precise architected memory state accessor macros, NOTE: speculative copy on
    write storage provided for fast recovery during wrong path execute (see
    tracer_recover() for details on this process */
-#define __READ_SPECMEM(SRC, SRC_V, FAULT)				\
+#define __READ_SPECMEM(TID, SRC, SRC_V, FAULT)				\
   (addr = (SRC),							\
    (spec_mode								\
-    ? ((FAULT) = spec_mem_access(mem, Read, addr, &SRC_V, sizeof(SRC_V)))\
-    : ((FAULT) = mem_access(mem, Read, addr, &SRC_V, sizeof(SRC_V)))),	\
+    ? ((FAULT) = spec_mem_access(mem[TID], Read, addr, &SRC_V, sizeof(SRC_V)))\
+    : ((FAULT) = mem_access(mem[TID], Read, addr, &SRC_V, sizeof(SRC_V)))),	\
    SRC_V)
 
-#define READ_BYTE(SRC, FAULT)						\
-  __READ_SPECMEM((SRC), temp_byte, (FAULT))
-#define READ_HALF(SRC, FAULT)						\
-  MD_SWAPH(__READ_SPECMEM((SRC), temp_half, (FAULT)))
-#define READ_WORD(SRC, FAULT)						\
-  MD_SWAPW(__READ_SPECMEM((SRC), temp_word, (FAULT)))
+#define READ_BYTE(TID, SRC, FAULT)						\
+  __READ_SPECMEM(TID, (SRC), temp_byte, (FAULT))
+#define READ_HALF(TID, SRC, FAULT)						\
+  MD_SWAPH(__READ_SPECMEM(TID, (SRC), temp_half, (FAULT)))
+#define READ_WORD(TID, SRC, FAULT)						\
+  MD_SWAPW(__READ_SPECMEM(TID, (SRC), temp_word, (FAULT)))
 #ifdef HOST_HAS_QWORD
-#define READ_QWORD(SRC, FAULT)						\
-  MD_SWAPQ(__READ_SPECMEM((SRC), temp_qword, (FAULT)))
+#define READ_QWORD(TID, SRC, FAULT)						\
+  MD_SWAPQ(__READ_SPECMEM(TID, (SRC), temp_qword, (FAULT)))
 #endif /* HOST_HAS_QWORD */
 
 
-#define __WRITE_SPECMEM(SRC, DST, DST_V, FAULT)				\
+#define __WRITE_SPECMEM(TID, SRC, DST, DST_V, FAULT)				\
   (DST_V = (SRC), addr = (DST),						\
    (spec_mode								\
-    ? ((FAULT) = spec_mem_access(mem, Write, addr, &DST_V, sizeof(DST_V)))\
-    : ((FAULT) = mem_access(mem, Write, addr, &DST_V, sizeof(DST_V)))))
+    ? ((FAULT) = spec_mem_access(mem[TID], Write, addr, &DST_V, sizeof(DST_V)))\
+    : ((FAULT) = mem_access(mem[TID], Write, addr, &DST_V, sizeof(DST_V)))))
 
-#define WRITE_BYTE(SRC, DST, FAULT)					\
-  __WRITE_SPECMEM((SRC), (DST), temp_byte, (FAULT))
-#define WRITE_HALF(SRC, DST, FAULT)					\
-  __WRITE_SPECMEM(MD_SWAPH(SRC), (DST), temp_half, (FAULT))
-#define WRITE_WORD(SRC, DST, FAULT)					\
-  __WRITE_SPECMEM(MD_SWAPW(SRC), (DST), temp_word, (FAULT))
+#define WRITE_BYTE(TID, SRC, DST, FAULT)					\
+  __WRITE_SPECMEM(TID, (SRC), (DST), temp_byte, (FAULT))
+#define WRITE_HALF(TID, SRC, DST, FAULT)					\
+  __WRITE_SPECMEM(TID, MD_SWAPH(SRC), (DST), temp_half, (FAULT))
+#define WRITE_WORD(TID, SRC, DST, FAULT)					\
+  __WRITE_SPECMEM(TID, MD_SWAPW(SRC), (DST), temp_word, (FAULT))
 #ifdef HOST_HAS_QWORD
-#define WRITE_QWORD(SRC, DST, FAULT)					\
-  __WRITE_SPECMEM(MD_SWAPQ(SRC), (DST), temp_qword, (FAULT))
+#define WRITE_QWORD(TID, SRC, DST, FAULT)					\
+  __WRITE_SPECMEM(TID, MD_SWAPQ(SRC), (DST), temp_qword, (FAULT))
 #endif /* HOST_HAS_QWORD */
 
 /* system call handler macro */
-#define SYSCALL(INST)							\
+#define SYSCALL(TID, INST)							\
   (/* only execute system calls in non-speculative mode */		\
    (spec_mode ? panic("speculative syscall") : (void) 0),		\
-   sys_syscall(&regs, mem_access, mem, INST, TRUE))
+   sys_syscall(&regs[TID], mem_access, mem[TID], INST, TRUE))
 
 // /* default register state accessor, used by DLite */
 static char *					/* err str, NULL for no err */
@@ -3872,7 +3875,7 @@ ruu_dispatch(void)
       if (!spec_mode && verbose)
         {
           myfprintf(stderr, "++ %10n [xor: 0x%08x] {%d} @ 0x%08p: ",
-                    sim_num_insn, md_xor_regs(&regs),
+                    sim_num_insn, md_xor_regs(&regs[tid]),
                     inst_seq+1, regs[tid].regs_PC);
           md_print_insn(inst, regs[tid].regs_PC, stderr);
           fprintf(stderr, "\n");
@@ -4262,8 +4265,8 @@ ruu_fetch(void)
       fetch_regs_PC[fetch_last_thread] = fetch_pred_PC[fetch_last_thread];
 
       /* is this a bogus text address? (can happen on mis-spec path) */
-      if (ld_text_base <= fetch_regs_PC
-	  && fetch_regs_PC < (ld_text_base+ld_text_size)
+      if (ld_text_base <= fetch_regs_PC[fetch_last_thread]
+	  && fetch_regs_PC[fetch_last_thread] < (ld_text_base+ld_text_size)
 	  && !(fetch_regs_PC[fetch_last_thread] & (sizeof(md_inst_t)-1)))
 	{
 	  /* read instruction from memory */
@@ -4275,7 +4278,7 @@ ruu_fetch(void)
 	    {
 	      /* access the I-cache */
 	      lat =
-		cache_access(cache_il1, Read, fetch_last_thread, IACOMPRESS(fetch_regs_PC),
+		cache_access(cache_il1, Read, fetch_last_thread, IACOMPRESS(fetch_regs_PC[fetch_last_thread]),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
 			     NULL, NULL);
 	      if (lat > cache_il1_lat)
@@ -4287,7 +4290,7 @@ ruu_fetch(void)
 	      /* access the I-TLB, NOTE: this code will initiate
 		 speculative TLB misses */
 	      tlb_lat =
-		cache_access(itlb, Read, fetch_last_thread, IACOMPRESS(fetch_regs_PC),
+		cache_access(itlb, Read, fetch_last_thread, IACOMPRESS(fetch_regs_PC[fetch_last_thread]),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
 			     NULL, NULL);
 	      if (tlb_lat > 1)
@@ -4445,7 +4448,7 @@ simoo_mstate_obj(FILE *stream,			/* output stream */
     {
       /* dump event queue contents */
       for (int index = 0; index < thread_num; index++) {
-        fprintf(stream, "** create vector state - thread %n **\n", index);
+        fprintf(stream, "** create vector state - thread %d **\n", index);
         cv_dump(index, stream);
       }
     }
