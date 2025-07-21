@@ -131,7 +131,8 @@ typedef char *					/* error str, NULL if none */
 /* DLite memory access function, the debugger uses this function to access
    simulator memory state */
 typedef char *					/* error str, NULL if none */
-(*dlite_mem_obj_t)(struct mem_t *mem,		/* memory space to access */
+(*dlite_mem_obj_t)(int tid,
+		   struct mem_t *mem,		/* memory space to access */
 		   int is_write,		/* access type */
 		   md_addr_t addr,		/* address to access */
 		   char *p,			/* input/output buffer */

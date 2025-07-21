@@ -921,7 +921,8 @@ struct osf_tbl_sysinfo
    precise when this function is called, register and memory are updated with
    the results of the sustem call */
 void
-sys_syscall(struct regs_t *regs,	/* registers to access */
+sys_syscall(int tid,
+		struct regs_t *regs,	/* registers to access */
 	    mem_access_fn mem_fn,	/* generic memory accessor */
 	    struct mem_t *mem,		/* memory space to access */
 	    md_inst_t inst,		/* system call inst */
@@ -936,7 +937,7 @@ sys_syscall(struct regs_t *regs,	/* registers to access */
   /* first, check if an EIO trace is being consumed... */
   if (traceable && sim_eio_fd != NULL)
     {
-      eio_read_trace(sim_eio_fd, sim_num_insn, regs, mem_fn, mem, inst);
+      eio_read_trace(tid, sim_eio_fd, sim_num_insn, regs, mem_fn, mem, inst);
 
       /* kludge fix for sigreturn(), it modifies all registers */
       if (syscode == OSF_SYS_sigreturn)
@@ -1409,17 +1410,17 @@ sys_syscall(struct regs_t *regs,	/* registers to access */
 	md_addr_t addr;
 
 	delta = regs->regs_R[MD_REG_A0];
-	addr = ld_brk_point + delta;
+	addr = ld_brk_point[tid] + delta;
 
 	if (verbose)
 	  myfprintf(stderr, "SYS_sbrk: delta: 0x%012p (%ld)\n", delta, delta);
 
-	ld_brk_point = addr;
-	regs->regs_R[MD_REG_V0] = ld_brk_point;
+	ld_brk_point[tid] = addr;
+	regs->regs_R[MD_REG_V0] = ld_brk_point[tid];
 	regs->regs_R[MD_REG_A3] = 0;
 
 	if (verbose)
-	  myfprintf(stderr, "ld_brk_point: 0x%012p\n", ld_brk_point);
+	  myfprintf(stderr, "ld_brk_point: 0x%012p\n", ld_brk_point[tid]);
 
 #if 0
 	/* check whether heap area has merged with stack area */
@@ -1450,12 +1451,12 @@ sys_syscall(struct regs_t *regs,	/* registers to access */
 	if (verbose)
 	  myfprintf(stderr, "SYS_obreak: addr: 0x%012p\n", addr);
 
-	ld_brk_point = addr;
-	regs->regs_R[MD_REG_V0] = ld_brk_point;
+	ld_brk_point[tid] = addr;
+	regs->regs_R[MD_REG_V0] = ld_brk_point[tid];
 	regs->regs_R[MD_REG_A3] = 0;
 
 	if (verbose)
-	  myfprintf(stderr, "ld_brk_point: 0x%012p\n", ld_brk_point);
+	  myfprintf(stderr, "ld_brk_point: 0x%012p\n", ld_brk_point[tid]);
       }
       break;
 

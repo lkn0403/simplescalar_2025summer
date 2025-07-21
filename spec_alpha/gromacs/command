@@ -1,1 +1,0 @@
-gromacs -silent -deffnm gromacs -nice 0 > gromacs.ref.out 2> gromacs.ref.err

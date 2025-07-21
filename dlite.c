@@ -218,8 +218,8 @@ ident_evaluator(struct eval_state_t *es)	/* expression evaluator */
     }
 
   /* else, try to locate a program symbol */
-  sym_loadsyms(ld_prog_fname, /* load locals */TRUE);
-  sym = sym_bind_name(es->tok_buf, NULL, sdb_any);
+  sym_loadsyms(current_dlite_tid, ld_prog_fname[current_dlite_tid], /* load locals */TRUE);
+  sym = sym_bind_name(current_dlite_tid, es->tok_buf, NULL, sdb_any);
   if (sym)
     {
       /* found a symbol with this name, return it's (address) value */
@@ -1076,7 +1076,7 @@ dlite_cont(int nargs, union arg_val_t args[],	/* command arguments */
 {
   struct eval_value_t val;
 
-  if (!f_dlite_reg_obj || !f_dlite_mem_obj)
+  if (!f_dlite_reg_obj[current_dlite_tid] || !f_dlite_mem_obj[current_dlite_tid])
     panic("DLite is not configured");
 
   if (nargs != 0 && nargs != 1)
@@ -1352,7 +1352,7 @@ dlite_mstate(int nargs, union arg_val_t args[],	/* command arguments */
   if (nargs != 0 && nargs != 1)
     return "too many arguments";
 
-  if (f_dlite_mstate_obj)
+  if (f_dlite_mstate_obj[current_dlite_tid])
     {
       if (nargs == 0)
 	{
@@ -1422,7 +1422,7 @@ dlite_display(int nargs, union arg_val_t args[],/* command arguments */
     size = 4;
 
   /* read memory */
-  errstr = f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE, addr, (char *)buf, size);
+  errstr = f_dlite_mem_obj[current_dlite_tid](current_dlite_tid, mem, /* !is_write */FALSE, addr, (char *)buf, size);
   if (errstr)
     return errstr;
 
@@ -1530,7 +1530,7 @@ dlite_dump(int nargs, union arg_val_t args[],	/* command arguments */
       for (i=0; i < count; i++)
 	{
 	  errstr =
-	    f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
+	    f_dlite_mem_obj[current_dlite_tid](current_dlite_tid, mem, /* !is_write */FALSE,
 			    i_addr, (char *)&byte, 1);
 	  if (errstr)
 	    return errstr;
@@ -1561,7 +1561,7 @@ dlite_dump(int nargs, union arg_val_t args[],	/* command arguments */
 	      if (i_addr >= addr && i_count <= count)
 		{
 		  errstr =
-		    f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
+		    f_dlite_mem_obj[current_dlite_tid](current_dlite_tid, mem, /* !is_write */FALSE,
 				    i_addr, (char *)&byte, 1);
 		  if (errstr)
 		    return errstr;
@@ -1648,7 +1648,7 @@ dlite_dis(int nargs, union arg_val_t args[],	/* command arguments */
       /* read and disassemble instruction */
       myfprintf(stdout, "    0x%08p:   ", addr);
       errstr =
-	f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
+	f_dlite_mem_obj[current_dlite_tid](current_dlite_tid, mem, /* !is_write */FALSE,
 			addr, (char *)&inst, sizeof(inst));
       inst = MD_SWAPI(inst);
       if (errstr)
@@ -2082,11 +2082,11 @@ dlite_symbols(int nargs, union arg_val_t args[],/* command arguments */
     return "wrong number of arguments";
 
   /* load symbols, if not already loaded */
-  sym_loadsyms(ld_prog_fname, /* !locals */FALSE);
+  sym_loadsyms(current_dlite_tid, ld_prog_fname[current_dlite_tid], /* !locals */FALSE);
 
   /* print all symbol values */
-  for (i=0; i<sym_nsyms; i++)
-    sym_dumpsym(sym_syms[i], stdout);
+  for (i=0; i<sym_nsyms[current_dlite_tid]; i++)
+    sym_dumpsym(sym_syms[current_dlite_tid][i], stdout);
 
   /* no error */
   return NULL;
@@ -2104,11 +2104,11 @@ dlite_tsymbols(int nargs, union arg_val_t args[],/* command arguments */
     return "wrong number of arguments";
 
   /* load symbols, if not already loaded */
-  sym_loadsyms(ld_prog_fname, /* !locals */FALSE);
+  sym_loadsyms(current_dlite_tid, ld_prog_fname[current_dlite_tid], /* !locals */FALSE);
 
   /* print all symbol values */
-  for (i=0; i<sym_ntextsyms; i++)
-    sym_dumpsym(sym_textsyms[i], stdout);
+  for (i=0; i<sym_ntextsyms[current_dlite_tid]; i++)
+    sym_dumpsym(sym_textsyms[current_dlite_tid][i], stdout);
 
   /* no error */
   return NULL;
@@ -2126,11 +2126,11 @@ dlite_dsymbols(int nargs, union arg_val_t args[],/* command arguments */
     return "wrong number of arguments";
 
   /* load symbols, if not already loaded */
-  sym_loadsyms(ld_prog_fname, /* !locals */FALSE);
+  sym_loadsyms(current_dlite_tid, ld_prog_fname[current_dlite_tid], /* !locals */FALSE);
 
   /* print all symbol values */
-  for (i=0; i<sym_ndatasyms; i++)
-    sym_dumpsym(sym_datasyms[i], stdout);
+  for (i=0; i<sym_ndatasyms[current_dlite_tid]; i++)
+    sym_dumpsym(sym_datasyms[current_dlite_tid][i], stdout);
 
   /* no error */
   return NULL;
@@ -2149,15 +2149,15 @@ dlite_symbol(int nargs, union arg_val_t args[],	/* command arguments */
     return "wrong number of arguments";
 
   /* load symbols, if not already loaded */
-  sym_loadsyms(ld_prog_fname, /* !locals */FALSE);
+  sym_loadsyms(current_dlite_tid, ld_prog_fname[current_dlite_tid], /* !locals */FALSE);
 
   /* print a single option, specified by argument */
-  sym = sym_bind_name(args[0].as_str, &index, sdb_any);
+  sym = sym_bind_name(current_dlite_tid, args[0].as_str, &index, sdb_any);
   if (!sym)
     return "symbol is not defined";
 
   /* else, print this symbols's value */
-  sym_dumpsym(sym_syms_by_name[index], stdout);
+  sym_dumpsym(sym_syms_by_name[current_dlite_tid][index], stdout);
 
   /* no error */
   return NULL;
@@ -2199,7 +2199,7 @@ dlite_status(
       fprintf(stdout, "Instruction (now finished) that caused data break:\n");
       myfprintf(stdout, "[%10n] 0x%08p:    ", cycle, regs_PC);
       errstr =
-	f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
+	f_dlite_mem_obj[current_dlite_tid](current_dlite_tid, mem, /* !is_write */FALSE,
 			regs_PC, (char *)&inst, sizeof(inst));
       inst = MD_SWAPI(inst);
       if (errstr)
@@ -2213,7 +2213,7 @@ dlite_status(
   /* read and disassemble instruction */
   myfprintf(stdout, "[%10n] 0x%08p:    ", cycle, next_PC);
   errstr =
-    f_dlite_mem_obj[current_dlite_tid](mem, /* !is_write */FALSE,
+    f_dlite_mem_obj[current_dlite_tid](current_dlite_tid, mem, /* !is_write */FALSE,
 		    next_PC, (char *)&inst, sizeof(inst));
   inst = MD_SWAPI(inst);
   if (errstr)

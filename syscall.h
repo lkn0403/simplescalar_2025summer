@@ -90,7 +90,8 @@
    precise when this function is called, register and memory are updated with
    the results of the sustem call */
 void
-sys_syscall(struct regs_t *regs,	/* registers to access */
+sys_syscall(int tid,
+		struct regs_t *regs,	/* registers to access */
 	    mem_access_fn mem_fn,	/* generic memory accessor */
 	    struct mem_t *mem,		/* memory space to access */
 	    md_inst_t inst,		/* system call inst */

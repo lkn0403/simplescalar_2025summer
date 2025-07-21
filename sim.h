@@ -115,10 +115,10 @@ void sim_check_options(struct opt_odb_t *odb, int argc, char **argv);
 void sim_reg_stats(struct stat_sdb_t *sdb);
 
 /* initialize the simulator */
-void sim_init(void);
+void sim_init_smt(int num);
 
 /* load program into simulated state */
-void sim_load_prog(char *fname, int argc, char **argv, char **envp);
+void sim_load_prog_smt(int tid, char *fname, int argc, char **argv, char **envp);
 
 /* main() prints the option database values next... */
 

@@ -1363,9 +1363,10 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
 					/* format */"0x%lx %lu %.2f",
 					/* print fn */NULL);
     }
-  ld_reg_stats(sdb);
-  for (int index = 0; index < thread_num; index++)
+  for (int index = 0; index < thread_num; index++) {
     mem_reg_stats(mem[index], sdb);
+    ld_reg_stats(index, sdb);
+  }
 }
 
 /* forward declarations */
@@ -1413,7 +1414,8 @@ simoo_reg_obj(int tid,
 
 /* default memory state accessor, used by DLite */
 static char *					/* err str, NULL for no err */
-simoo_mem_obj(struct mem_t *mem,		/* memory space to access */
+simoo_mem_obj(int tid,
+        struct mem_t *mem,		/* memory space to access */
 	      int is_write,			/* access type */
 	      md_addr_t addr,			/* address to access */
 	      char *p,				/* input/output buffer */
@@ -1436,7 +1438,7 @@ sim_load_prog_smt(int tid, char *fname,		/* program to load */
 	      char **envp)		/* program environment */
 {
   /* load program text and data, set up environment, memory, and regs */
-  ld_load_prog(fname, argc, argv, envp, &regs[tid], mem[tid], TRUE);
+  ld_load_prog(tid, fname, argc, argv, envp, &regs[tid], mem[tid], TRUE);
 
   if (!tid) {
     /* initialize here, so symbols can be loaded */
@@ -2754,7 +2756,7 @@ ruu_issue(void)
 			  /* was the value store forwared from the LSQ? */
 			  if (!load_lat)
 			    {
-			      int valid_addr = MD_VALID_ADDR(rs->addr);
+			      int valid_addr = MD_VALID_ADDR(rs->tid, rs->addr);
 
 			      if (!spec_mode && !valid_addr)
 				sim_invalid_addrs++;
@@ -2778,7 +2780,7 @@ ruu_issue(void)
 			    }
 
 			  /* all loads and stores must to access D-TLB */
-			  if (dtlb && MD_VALID_ADDR(rs->addr))
+			  if (dtlb && MD_VALID_ADDR(rs->tid, rs->addr))
 			    {
 			      /* access the D-DLB, NOTE: this code will
 				 initiate speculative TLB misses */
@@ -3073,7 +3075,8 @@ tracer_init(void)
    generator transitions back to non-speculative trace generation mode,
    tracer_recover() clears this table, returns any access fault */
 static enum md_fault_type
-spec_mem_access(struct mem_t *mem,		/* memory space to access */
+spec_mem_access(int tid,
+    struct mem_t *mem,		/* memory space to access */
 		enum mem_cmd cmd,		/* Read or Write access cmd */
 		md_addr_t addr,			/* virtual address of access */
 		void *p,			/* input/output buffer */
@@ -3096,9 +3099,9 @@ spec_mem_access(struct mem_t *mem,		/* memory space to access */
     }
 
   /* check permissions */
-  if (!((addr >= ld_text_base && addr < (ld_text_base+ld_text_size)
+  if (!((addr >= ld_text_base[tid] && addr < (ld_text_base[tid]+ld_text_size[tid])
 	 && cmd == Read)
-	|| MD_VALID_ADDR(addr)))
+	|| MD_VALID_ADDR(tid, addr)))
     {
       /* no can do, return zero result */
       for (i=0; i < nbytes; i++)
@@ -3276,7 +3279,8 @@ mspec_dump(FILE *stream)			/* output stream */
 
 /* default memory state accessor, used by DLite */
 static char *					/* err str, NULL for no err */
-simoo_mem_obj(struct mem_t *mem,		/* memory space to access */
+simoo_mem_obj(int tid,
+        struct mem_t *mem,		/* memory space to access */
 	      int is_write,			/* access type */
 	      md_addr_t addr,			/* address to access */
 	      char *p,				/* input/output buffer */
@@ -3299,7 +3303,7 @@ simoo_mem_obj(struct mem_t *mem,		/* memory space to access */
 
   /* else, no error, access memory */
   if (spec_mode)
-    spec_mem_access(mem, cmd, addr, p, nbytes);
+    spec_mem_access(tid, mem, cmd, addr, p, nbytes);
   else
     mem_access(mem, cmd, addr, p, nbytes);
 
@@ -3570,7 +3574,7 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 #define __READ_SPECMEM(TID, SRC, SRC_V, FAULT)				\
   (addr = (SRC),							\
    (spec_mode								\
-    ? ((FAULT) = spec_mem_access(mem[TID], Read, addr, &SRC_V, sizeof(SRC_V)))\
+    ? ((FAULT) = spec_mem_access(TID, mem[TID], Read, addr, &SRC_V, sizeof(SRC_V)))\
     : ((FAULT) = mem_access(mem[TID], Read, addr, &SRC_V, sizeof(SRC_V)))),	\
    SRC_V)
 
@@ -3589,7 +3593,7 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 #define __WRITE_SPECMEM(TID, SRC, DST, DST_V, FAULT)				\
   (DST_V = (SRC), addr = (DST),						\
    (spec_mode								\
-    ? ((FAULT) = spec_mem_access(mem[TID], Write, addr, &DST_V, sizeof(DST_V)))\
+    ? ((FAULT) = spec_mem_access(TID, mem[TID], Write, addr, &DST_V, sizeof(DST_V)))\
     : ((FAULT) = mem_access(mem[TID], Write, addr, &DST_V, sizeof(DST_V)))))
 
 #define WRITE_BYTE(TID, SRC, DST, FAULT)					\
@@ -3607,7 +3611,7 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 #define SYSCALL(TID, INST)							\
   (/* only execute system calls in non-speculative mode */		\
    (spec_mode ? panic("speculative syscall") : (void) 0),		\
-   sys_syscall(&regs[TID], mem_access, mem[TID], INST, TRUE))
+   sys_syscall(TID, &regs[TID], mem_access, mem[TID], INST, TRUE))
 
 // /* default register state accessor, used by DLite */
 static char *					/* err str, NULL for no err */
@@ -4265,8 +4269,8 @@ ruu_fetch(void)
       fetch_regs_PC[fetch_last_thread] = fetch_pred_PC[fetch_last_thread];
 
       /* is this a bogus text address? (can happen on mis-spec path) */
-      if (ld_text_base <= fetch_regs_PC[fetch_last_thread]
-	  && fetch_regs_PC[fetch_last_thread] < (ld_text_base+ld_text_size)
+      if (ld_text_base[fetch_last_thread] <= fetch_regs_PC[fetch_last_thread]
+	  && fetch_regs_PC[fetch_last_thread] < (ld_text_base[fetch_last_thread]+ld_text_size[fetch_last_thread])
 	  && !(fetch_regs_PC[fetch_last_thread] & (sizeof(md_inst_t)-1)))
 	{
 	  /* read instruction from memory */
@@ -4485,7 +4489,7 @@ sim_main(void)
 
   for (int index = 0; index < thread_num; index++) {
   /* set up program entry state */
-    regs[index].regs_PC = ld_prog_entry;
+    regs[index].regs_PC = ld_prog_entry[index];
     regs[index].regs_NPC = regs[index].regs_PC + sizeof(md_inst_t);
     /* check for DLite debugger entry condition */
       current_dlite_tid = index;
