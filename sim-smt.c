@@ -358,7 +358,7 @@ static unsigned int ptrace_seq = 0;
    instructions down the wrong path, thus state recovery will eventually have
    to occur that resets processor register and memory state back to the last
    precise state */
-static int spec_mode = FALSE;
+static int spec_mode[MAX_THREAD];
 
 /* cycles until fetch issue resumes */
 static unsigned ruu_fetch_issue_delay = 0;
@@ -1363,9 +1363,9 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
 					/* format */"0x%lx %lu %.2f",
 					/* print fn */NULL);
     }
-  for (int index = 0; index < thread_num; index++) {
-    mem_reg_stats(mem[index], sdb);
-    ld_reg_stats(index, sdb);
+  for (int tid = 0; tid < thread_num; tid++) {
+    mem_reg_stats(mem[tid], sdb);
+    ld_reg_stats(tid, sdb);
   }
 }
 
@@ -1392,13 +1392,13 @@ sim_init_smt(int num)
     calloc(thread_num, sizeof(struct mem_t *));
 
   /* allocate and initialize register file */
-  for (int index = 0; index < thread_num; index++) {
+  for (int tid = 0; tid < thread_num; tid++) {
     char mem_name[32];
-    sprintf(mem_name, "mem%d", index);
+    sprintf(mem_name, "mem%d", tid);
 
-    regs_init(&regs[index]);
-    mem[index] = mem_create(mem_name);
-    mem_init(mem[index]);
+    regs_init(&regs[tid]);
+    mem[tid] = mem_create(mem_name);
+    mem_init(mem[tid]);
   }
 
 }
@@ -2104,7 +2104,7 @@ static tick_t spec_create_vector_rt[MAX_THREAD][MD_TOTAL_REGS];
 				 : create_vector_rt[TID][N])
 
 /* set a create vector entry */
-#define SET_CREATE_VECTOR(TID, N, L) (spec_mode                              \
+#define SET_CREATE_VECTOR(TID, N, L) (spec_mode[TID]                              \
 				 ? (BITMAP_SET(use_spec_cv[TID], CV_BMAP_SZ, (N)),\
 				    spec_create_vector[TID][N] = (L))        \
 				 : (create_vector[TID][N] = (L)))
@@ -2117,17 +2117,17 @@ cv_init(void)
 
   /* initially all registers are valid in the architected register file,
      i.e., the create vector entry is CVLINK_NULL */
-  for (int index = 0; index < MAX_THREAD; index++) {
+  for (int tid = 0; tid < MAX_THREAD; tid++) {
     for (i=0; i < MD_TOTAL_REGS; i++)
       {
-        create_vector[index][i] = CVLINK_NULL;
-        create_vector_rt[index][i] = 0;
-        spec_create_vector[index][i] = CVLINK_NULL;
-        spec_create_vector_rt[index][i] = 0;
+        create_vector[tid][i] = CVLINK_NULL;
+        create_vector_rt[tid][i] = 0;
+        spec_create_vector[tid][i] = CVLINK_NULL;
+        spec_create_vector_rt[tid][i] = 0;
       }
 
     /* all create vector entries are non-speculative */
-    BITMAP_CLEAR_MAP(use_spec_cv[index], CV_BMAP_SZ);
+    BITMAP_CLEAR_MAP(use_spec_cv[tid], CV_BMAP_SZ);
   }
   }
 
@@ -2348,16 +2348,17 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
 	    panic("RUU and LSQ out of sync");
 
 	  /* recover any resources consumed by the load or store operation */
-	  for (i=0; i<MAX_ODEPS; i++)
-	    {
-	      RSLINK_FREE_LIST(LSQ[LSQ_index].odep_list[i]);
-	      /* blow away the consuming op list */
-	      LSQ[LSQ_index].odep_list[i] = NULL;
-	    }
-      
-	  /* squash this LSQ entry */
-	  LSQ[LSQ_index].tag++;
-
+    if (LSQ[LSQ_index].tid == recover_thread) {
+      for (i=0; i<MAX_ODEPS; i++)
+        {
+          RSLINK_FREE_LIST(LSQ[LSQ_index].odep_list[i]);
+          /* blow away the consuming op list */
+          LSQ[LSQ_index].odep_list[i] = NULL;
+        }
+        
+      /* squash this LSQ entry */
+      LSQ[LSQ_index].tag++;
+    }
 	  /* indicate in pipetrace that this instruction was squashed */
 	  ptrace_endinst(LSQ[LSQ_index].ptrace_seq);
 
@@ -2368,16 +2369,16 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
 	}
 
       /* recover any resources used by this RUU operation */
+    if (RUU[RUU_index].tid == recover_thread) {
       for (i=0; i<MAX_ODEPS; i++)
-	{
-	  RSLINK_FREE_LIST(RUU[RUU_index].odep_list[i]);
-	  /* blow away the consuming op list */
-	  RUU[RUU_index].odep_list[i] = NULL;
-	}
-      
+        {
+          RSLINK_FREE_LIST(RUU[RUU_index].odep_list[i]);
+          /* blow away the consuming op list */
+          RUU[RUU_index].odep_list[i] = NULL;
+        }
       /* squash this RUU entry */
       RUU[RUU_index].tag++;
-
+    }
       /* indicate in pipetrace that this instruction was squashed */
       ptrace_endinst(RUU[RUU_index].ptrace_seq);
 
@@ -2564,16 +2565,22 @@ ruu_writeback(void)
 static void
 lsq_refresh(void)
 {
-  int i, j, index, n_std_unknowns;
-  md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
+  int i, j, index;
+  int sta_known[MAX_THREAD];
+  int n_std_unknowns[MAX_THREAD];
+  md_addr_t std_unknowns[MAX_THREAD][MAX_STD_UNKNOWNS];
 
   /* scan entire queue for ready loads: scan from oldest instruction
      (head) until we reach the tail or an unresolved store, after which no
      other instruction will become ready */
-  for (i=0, index=LSQ_head, n_std_unknowns=0;
+  for (int tid=0; tid<thread_num; tid++) { n_std_unknowns[tid] = 0; sta_known[tid] = 1; }
+
+  for (i=0, index=LSQ_head;
        i < LSQ_num;
        i++, index=(index + 1) % LSQ_size)
     {
+      int tid = LSQ[index].tid;
+      if (!sta_known[tid]) continue;
       /* terminate search for ready loads after first unresolved store,
 	 as no later load could be resolved in its presence */
       if (/* store? */
@@ -2583,7 +2590,8 @@ lsq_refresh(void)
 	    {
 	      /* FIXME: a later STD + STD known could hide the STA unknown */
 	      /* sta unknown, blocks all later loads, stop search */
-	      break;
+        sta_known[tid] = 0;
+	      continue;
 	    }
 	  else if (!OPERANDS_READY(&LSQ[index]))
 	    {
@@ -2591,17 +2599,17 @@ lsq_refresh(void)
 		 this address for later referral, we use an array here because
 		 for most simulations the number of entries to search will be
 		 very small */
-	      if (n_std_unknowns == MAX_STD_UNKNOWNS)
+	      if (n_std_unknowns[tid] == MAX_STD_UNKNOWNS)
 		fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-	      std_unknowns[n_std_unknowns++] = LSQ[index].addr;
+	      std_unknowns[tid][n_std_unknowns[tid]++] = LSQ[index].addr;
 	    }
 	  else /* STORE_ADDR_READY() && OPERANDS_READY() */
 	    {
 	      /* a later STD known hides an earlier STD unknown */
-	      for (j=0; j<n_std_unknowns; j++)
+	      for (j=0; j<n_std_unknowns[tid]; j++)
 		{
-		  if (std_unknowns[j] == /* STA/STD known */LSQ[index].addr)
-		    std_unknowns[j] = /* bogus addr */0;
+		  if (std_unknowns[tid][j] == /* STA/STD known */LSQ[index].addr)
+		    std_unknowns[tid][j] = /* bogus addr */0;
 		}
 	    }
 	}
@@ -2615,13 +2623,13 @@ lsq_refresh(void)
 	{
 	  /* no STA unknown conflict (because we got to this check), check for
 	     a STD unknown conflict */
-	  for (j=0; j<n_std_unknowns; j++)
+	  for (j=0; j<n_std_unknowns[tid]; j++)
 	    {
 	      /* found a relevant STD unknown? */
-	      if (std_unknowns[j] == LSQ[index].addr)
+	      if (std_unknowns[tid][j] == LSQ[index].addr)
 		break;
 	    }
-	  if (j == n_std_unknowns)
+	  if (j == n_std_unknowns[tid])
 	    {
 	      /* no STA or STD unknown conflicts, put load on ready queue */
 	      readyq_enqueue(&LSQ[index]);
@@ -2758,7 +2766,7 @@ ruu_issue(void)
 			    {
 			      int valid_addr = MD_VALID_ADDR(rs->tid, rs->addr);
 
-			      if (!spec_mode && !valid_addr)
+			      if (!spec_mode[rs->tid] && !valid_addr)
 				sim_invalid_addrs++;
 
 			      /* no! go to the data cache if addr is valid */
@@ -2887,22 +2895,22 @@ ruu_issue(void)
 
 /* integer register file */
 #define R_BMAP_SZ       (BITMAP_SIZE(MD_NUM_IREGS))
-static BITMAP_TYPE(MD_NUM_IREGS, use_spec_R);
-static md_gpr_t spec_regs_R;
+static BITMAP_TYPE(MD_NUM_IREGS, use_spec_R[MAX_THREAD]);
+static md_gpr_t spec_regs_R[MAX_THREAD];
 
 /* floating point register file */
 #define F_BMAP_SZ       (BITMAP_SIZE(MD_NUM_FREGS))
-static BITMAP_TYPE(MD_NUM_FREGS, use_spec_F);
-static md_fpr_t spec_regs_F;
+static BITMAP_TYPE(MD_NUM_FREGS, use_spec_F[MAX_THREAD]);
+static md_fpr_t spec_regs_F[MAX_THREAD];
 
 /* miscellaneous registers */
 #define C_BMAP_SZ       (BITMAP_SIZE(MD_NUM_CREGS))
-static BITMAP_TYPE(MD_NUM_FREGS, use_spec_C);
-static md_ctrl_t spec_regs_C;
+static BITMAP_TYPE(MD_NUM_FREGS, use_spec_C[MAX_THREAD]);
+static md_ctrl_t spec_regs_C[MAX_THREAD];
 
 /* dump speculative register state */
 static void
-rspec_dump(FILE *stream)			/* output stream */
+rspec_dump(int tid, FILE *stream)			/* output stream */
 {
   int i;
 
@@ -2911,14 +2919,14 @@ rspec_dump(FILE *stream)			/* output stream */
 
   fprintf(stream, "** speculative register contents **\n");
 
-  fprintf(stream, "spec_mode: %s\n", spec_mode ? "t" : "f");
+  fprintf(stream, "spec_mode: %s\n", spec_mode[tid] ? "t" : "f");
 
   /* dump speculative integer regs */
   for (i=0; i < MD_NUM_IREGS; i++)
     {
-      if (BITMAP_SET_P(use_spec_R, R_BMAP_SZ, i))
+      if (BITMAP_SET_P(use_spec_R[tid], R_BMAP_SZ, i))
 	{
-	  md_print_ireg(spec_regs_R, i, stream);
+	  md_print_ireg(spec_regs_R[tid], i, stream);
 	  fprintf(stream, "\n");
 	}
     }
@@ -2926,9 +2934,9 @@ rspec_dump(FILE *stream)			/* output stream */
   /* dump speculative FP regs */
   for (i=0; i < MD_NUM_FREGS; i++)
     {
-      if (BITMAP_SET_P(use_spec_F, F_BMAP_SZ, i))
+      if (BITMAP_SET_P(use_spec_F[tid], F_BMAP_SZ, i))
 	{
-	  md_print_fpreg(spec_regs_F, i, stream);
+	  md_print_fpreg(spec_regs_F[tid], i, stream);
 	  fprintf(stream, "\n");
 	}
     }
@@ -2936,9 +2944,9 @@ rspec_dump(FILE *stream)			/* output stream */
   /* dump speculative CTRL regs */
   for (i=0; i < MD_NUM_CREGS; i++)
     {
-      if (BITMAP_SET_P(use_spec_C, C_BMAP_SZ, i))
+      if (BITMAP_SET_P(use_spec_C[tid], C_BMAP_SZ, i))
 	{
-	  md_print_creg(spec_regs_C, i, stream);
+	  md_print_creg(spec_regs_C[tid], i, stream);
 	  fprintf(stream, "\n");
 	}
     }
@@ -2958,15 +2966,15 @@ struct spec_mem_ent {
 };
 
 /* speculative memory hash table */
-static struct spec_mem_ent *store_htable[STORE_HASH_SIZE];
+static struct spec_mem_ent *store_htable[MAX_THREAD][STORE_HASH_SIZE];
 
 /* speculative memory hash table bucket free list */
-static struct spec_mem_ent *bucket_free_list = NULL;
+static struct spec_mem_ent *bucket_free_list[MAX_THREAD];
 
 
 /* program counter */
-static md_addr_t pred_PC;
-static md_addr_t recover_PC;
+static md_addr_t pred_PC[MAX_THREAD];
+static md_addr_t recover_PC[MAX_THREAD];
 
 /* fetch unit next fetch address */
 static md_addr_t fetch_regs_PC[MAX_THREAD];
@@ -2996,29 +3004,29 @@ tracer_recover(int tid)
   struct spec_mem_ent *ent, *ent_next;
 
   /* better be in mis-speculative trace generation mode */
-  if (!spec_mode)
+  if (!spec_mode[tid])
     panic("cannot recover unless in speculative mode");
 
   /* reset to non-speculative trace generation mode */
-  spec_mode = FALSE;
+  spec_mode[tid] = FALSE;
 
   /* reset copied-on-write register bitmasks back to non-speculative state */
-  BITMAP_CLEAR_MAP(use_spec_R, R_BMAP_SZ);
-  BITMAP_CLEAR_MAP(use_spec_F, F_BMAP_SZ);
-  BITMAP_CLEAR_MAP(use_spec_C, C_BMAP_SZ);
+  BITMAP_CLEAR_MAP(use_spec_R[tid], R_BMAP_SZ);
+  BITMAP_CLEAR_MAP(use_spec_F[tid], F_BMAP_SZ);
+  BITMAP_CLEAR_MAP(use_spec_C[tid], C_BMAP_SZ);
 
   /* reset memory state back to non-speculative state */
   /* FIXME: could version stamps be used here?!?!? */
   for (i=0; i<STORE_HASH_SIZE; i++)
     {
       /* release all hash table buckets */
-      for (ent=store_htable[i]; ent; ent=ent_next)
-	{
-	  ent_next = ent->next;
-	  ent->next = bucket_free_list;
-	  bucket_free_list = ent;
-	}
-      store_htable[i] = NULL;
+      for (ent=store_htable[tid][i]; ent; ent=ent_next)
+        {
+          ent_next = ent->next;
+          ent->next = bucket_free_list[tid];
+          bucket_free_list[tid] = ent;
+        }
+      store_htable[tid][i] = NULL;
     }
 
   /* if pipetracing, indicate squash of instructions in the inst fetch queue */
@@ -3038,7 +3046,7 @@ tracer_recover(int tid)
   /* reset IFETCH state */
   fetch_num = 0;
   fetch_tail = fetch_head = 0;
-  fetch_pred_PC[tid] = fetch_regs_PC[tid] = recover_PC;
+  fetch_pred_PC[tid] = fetch_regs_PC[tid] = recover_PC[tid];
 }
 
 /* initialize the speculative instruction state generator state */
@@ -3047,17 +3055,21 @@ tracer_init(void)
 {
   int i;
 
-  /* initially in non-speculative mode */
-  spec_mode = FALSE;
+    for (int tid = 0; tid < MAX_THREAD; tid++) {
+      spec_mode[tid] = FALSE;
 
-  /* register state is from non-speculative state buffers */
-  BITMAP_CLEAR_MAP(use_spec_R, R_BMAP_SZ);
-  BITMAP_CLEAR_MAP(use_spec_F, F_BMAP_SZ);
-  BITMAP_CLEAR_MAP(use_spec_C, C_BMAP_SZ);
+      /* register state is from non-speculative state buffers */
+        BITMAP_CLEAR_MAP(use_spec_R[tid], R_BMAP_SZ);
+        BITMAP_CLEAR_MAP(use_spec_F[tid], F_BMAP_SZ);
+        BITMAP_CLEAR_MAP(use_spec_C[tid], C_BMAP_SZ);
+      for (i=0; i<STORE_HASH_SIZE; i++)
+        store_htable[tid][i] = NULL;
+      bucket_free_list[tid] = NULL;
+  }
+  /* initially in non-speculative mode */
+
 
   /* memory state is from non-speculative memory pages */
-  for (i=0; i<STORE_HASH_SIZE; i++)
-    store_htable[i] = NULL;
 }
 
 
@@ -3112,7 +3124,7 @@ spec_mem_access(int tid,
 
   /* has this memory state been copied on mis-speculative write? */
   index = HASH_ADDR(addr);
-  for (prev=NULL,ent=store_htable[index]; ent; prev=ent,ent=ent->next)
+  for (prev=NULL,ent=store_htable[tid][index]; ent; prev=ent,ent=ent->next)
     {
       if (ent->addr == addr)
 	{
@@ -3121,8 +3133,8 @@ spec_mem_access(int tid,
 	    {
 	      /* not at head of list, relink the hash table entry at front */
 	      prev->next = ent->next;
-              ent->next = store_htable[index];
-              store_htable[index] = ent;
+              ent->next = store_htable[tid][index];
+              store_htable[tid][index] = ent;
 	    }
 	  break;
 	}
@@ -3132,21 +3144,21 @@ spec_mem_access(int tid,
   if (!ent && cmd == Write)
     {
       /* try to get an entry from the free list, if available */
-      if (!bucket_free_list)
+      if (!bucket_free_list[tid])
 	{
 	  /* otherwise, call calloc() to get the needed storage */
-	  bucket_free_list = calloc(1, sizeof(struct spec_mem_ent));
-	  if (!bucket_free_list)
+	  bucket_free_list[tid] = calloc(1, sizeof(struct spec_mem_ent));
+	  if (!bucket_free_list[tid])
 	    fatal("out of virtual memory");
 	}
-      ent = bucket_free_list;
-      bucket_free_list = bucket_free_list->next;
+      ent = bucket_free_list[tid];
+      bucket_free_list[tid] = bucket_free_list[tid]->next;
 
       if (!bugcompat_mode)
 	{
 	  /* insert into hash table */
-	  ent->next = store_htable[index];
-	  store_htable[index] = ent;
+	  ent->next = store_htable[tid][index];
+	  store_htable[tid][index] = ent;
 	  ent->addr = addr;
 	  ent->data[0] = 0; ent->data[1] = 0;
 	}
@@ -3252,7 +3264,7 @@ spec_mem_access(int tid,
 
 /* dump speculative memory state */
 static void
-mspec_dump(FILE *stream)			/* output stream */
+mspec_dump(int tid, FILE *stream)			/* output stream */
 {
   int i;
   struct spec_mem_ent *ent;
@@ -3262,12 +3274,12 @@ mspec_dump(FILE *stream)			/* output stream */
 
   fprintf(stream, "** speculative memory contents **\n");
 
-  fprintf(stream, "spec_mode: %s\n", spec_mode ? "t" : "f");
+  fprintf(stream, "spec_mode: %s\n", spec_mode[tid] ? "t" : "f");
 
   for (i=0; i<STORE_HASH_SIZE; i++)
     {
       /* dump contents of all hash table buckets */
-      for (ent=store_htable[i]; ent; ent=ent->next)
+      for (ent=store_htable[tid][i]; ent; ent=ent->next)
 	{
 	  myfprintf(stream, "[0x%08p]: %12.0f/0x%08x:%08x\n",
 		    ent->addr, (double)(*((double *)ent->data)),
@@ -3302,7 +3314,7 @@ simoo_mem_obj(int tid,
 #endif
 
   /* else, no error, access memory */
-  if (spec_mode)
+  if (spec_mode[tid])
     spec_mem_access(tid, mem, cmd, addr, p, nbytes);
   else
     mem_access(mem, cmd, addr, p, nbytes);
@@ -3447,13 +3459,13 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 /* general purpose register accessors, NOTE: speculative copy on write storage
    provided for fast recovery during wrong path execute (see tracer_recover()
    for details on this process */
-#define GPR(TID, N)                  (BITMAP_SET_P(use_spec_R, R_BMAP_SZ, (N))\
-				 ? spec_regs_R[N]                       \
+#define GPR(TID, N)                  (BITMAP_SET_P(use_spec_R[TID], R_BMAP_SZ, (N))\
+				 ? spec_regs_R[TID][N]                       \
 				 : regs[TID].regs_R[N])
-#define SET_GPR(TID,N,EXPR)         (spec_mode				\
-				 ? ((spec_regs_R[N] = (EXPR)),		\
-				    BITMAP_SET(use_spec_R, R_BMAP_SZ, (N)),\
-				    spec_regs_R[N])			\
+#define SET_GPR(TID,N,EXPR)         (spec_mode[TID]				\
+				 ? ((spec_regs_R[TID][N] = (EXPR)),		\
+				    BITMAP_SET(use_spec_R[TID], R_BMAP_SZ, (N)),\
+				    spec_regs_R[TID][N])			\
 				 : (regs[TID].regs_R[N] = (EXPR)))
 
 #if defined(TARGET_PISA)
@@ -3519,49 +3531,49 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 /* floating point register accessors, NOTE: speculative copy on write storage
    provided for fast recovery during wrong path execute (see tracer_recover()
    for details on this process */
-#define FPR_Q(TID, N)		(BITMAP_SET_P(use_spec_F, F_BMAP_SZ, (N))\
-				 ? spec_regs_F.q[(N)]                   \
+#define FPR_Q(TID, N)		(BITMAP_SET_P(use_spec_F[TID], F_BMAP_SZ, (N))\
+				 ? spec_regs_F[TID].q[(N)]                   \
 				 : regs[TID].regs_F.q[(N)])
-#define SET_FPR_Q(TID, N,EXPR)	(spec_mode				\
-				 ? ((spec_regs_F.q[(N)] = (EXPR)),	\
-				    BITMAP_SET(use_spec_F,F_BMAP_SZ, (N)),\
-				    spec_regs_F.q[(N)])			\
+#define SET_FPR_Q(TID, N,EXPR)	(spec_mode[TID]				\
+				 ? ((spec_regs_F[TID].q[(N)] = (EXPR)),	\
+				    BITMAP_SET(use_spec_F[TID],F_BMAP_SZ, (N)),\
+				    spec_regs_F[TID].q[(N)])			\
 				 : (regs[TID].regs_F.q[(N)] = (EXPR)))
-#define FPR(TID, N)			(BITMAP_SET_P(use_spec_F, F_BMAP_SZ, (N))\
-				 ? spec_regs_F.d[(N)]			\
+#define FPR(TID, N)			(BITMAP_SET_P(use_spec_F[TID], F_BMAP_SZ, (N))\
+				 ? spec_regs_F[TID].d[(N)]			\
 				 : regs[TID].regs_F.d[(N)])
-#define SET_FPR(TID, N,EXPR)		(spec_mode				\
-				 ? ((spec_regs_F.d[(N)] = (EXPR)),	\
-				    BITMAP_SET(use_spec_F,F_BMAP_SZ, (N)),\
-				    spec_regs_F.d[(N)])			\
+#define SET_FPR(TID, N,EXPR)		(spec_mode[TID]				\
+				 ? ((spec_regs_F[TID].d[(N)] = (EXPR)),	\
+				    BITMAP_SET(use_spec_F[TID],F_BMAP_SZ, (N)),\
+				    spec_regs_F[TID].d[(N)])			\
 				 : (regs[TID].regs_F.d[(N)] = (EXPR)))
 
 /* miscellanous register accessors, NOTE: speculative copy on write storage
    provided for fast recovery during wrong path execute (see tracer_recover()
    for details on this process */
-#define FPCR(TID)			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fpcr*/0)\
-				 ? spec_regs_C.fpcr			\
+#define FPCR(TID)			(BITMAP_SET_P(use_spec_C[TID], C_BMAP_SZ,/*fpcr*/0)\
+				 ? spec_regs_C[TID].fpcr			\
 				 : regs[TID].regs_C.fpcr)
-#define SET_FPCR(TID, EXPR)		(spec_mode				\
-				 ? ((spec_regs_C.fpcr = (EXPR)),	\
-				   BITMAP_SET(use_spec_C,C_BMAP_SZ,/*fpcr*/0),\
-				    spec_regs_C.fpcr)			\
+#define SET_FPCR(TID, EXPR)		(spec_mode[TID]				\
+				 ? ((spec_regs_C[TID].fpcr = (EXPR)),	\
+				   BITMAP_SET(use_spec_C[TID],C_BMAP_SZ,/*fpcr*/0),\
+				    spec_regs_C[TID].fpcr)			\
 				 : (regs[TID].regs_C.fpcr = (EXPR)))
-#define UNIQ(TID)			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*uniq*/1)\
-				 ? spec_regs_C.uniq			\
+#define UNIQ(TID)			(BITMAP_SET_P(use_spec_C[TID], C_BMAP_SZ,/*uniq*/1)\
+				 ? spec_regs_C[TID].uniq			\
 				 : regs[TID].regs_C.uniq)
-#define SET_UNIQ(TID, EXPR)		(spec_mode				\
-				 ? ((spec_regs_C.uniq = (EXPR)),	\
-				   BITMAP_SET(use_spec_C,C_BMAP_SZ,/*uniq*/1),\
-				    spec_regs_C.uniq)			\
+#define SET_UNIQ(TID, EXPR)		(spec_mode[TID]				\
+				 ? ((spec_regs_C[TID].uniq = (EXPR)),	\
+				   BITMAP_SET(use_spec_C[TID],C_BMAP_SZ,/*uniq*/1),\
+				    spec_regs_C[TID].uniq)			\
 				 : (regs[TID].regs_C.uniq = (EXPR)))
-#define FCC(TID)			(BITMAP_SET_P(use_spec_C, C_BMAP_SZ,/*fcc*/2)\
-				 ? spec_regs_C.fcc			\
+#define FCC(TID)			(BITMAP_SET_P(use_spec_C[TID], C_BMAP_SZ,/*fcc*/2)\
+				 ? spec_regs_C[TID].fcc			\
 				 : regs[TID].regs_C.fcc)
-#define SET_FCC(EXPR)		(spec_mode				\
-				 ? ((spec_regs_C.fcc = (EXPR)),		\
-				    BITMAP_SET(use_spec_C,C_BMAP_SZ,/*fcc*/1),\
-				    spec_regs_C.fcc)			\
+#define SET_FCC(EXPR)		(spec_mode[TID]				\
+				 ? ((spec_regs_C[TID].fcc = (EXPR)),		\
+				    BITMAP_SET(use_spec_C[TID],C_BMAP_SZ,/*fcc*/1),\
+				    spec_regs_C[TID].fcc)			\
 				 : (regs[TID].regs_C.fcc = (EXPR)))
 
 #else
@@ -3573,7 +3585,7 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
    tracer_recover() for details on this process */
 #define __READ_SPECMEM(TID, SRC, SRC_V, FAULT)				\
   (addr = (SRC),							\
-   (spec_mode								\
+   (spec_mode[TID]								\
     ? ((FAULT) = spec_mem_access(TID, mem[TID], Read, addr, &SRC_V, sizeof(SRC_V)))\
     : ((FAULT) = mem_access(mem[TID], Read, addr, &SRC_V, sizeof(SRC_V)))),	\
    SRC_V)
@@ -3592,7 +3604,7 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 
 #define __WRITE_SPECMEM(TID, SRC, DST, DST_V, FAULT)				\
   (DST_V = (SRC), addr = (DST),						\
-   (spec_mode								\
+   (spec_mode[TID]								\
     ? ((FAULT) = spec_mem_access(TID, mem[TID], Write, addr, &DST_V, sizeof(DST_V)))\
     : ((FAULT) = mem_access(mem[TID], Write, addr, &DST_V, sizeof(DST_V)))))
 
@@ -3610,7 +3622,7 @@ ruu_install_odep(struct RUU_station *rs,	/* creating RUU station */
 /* system call handler macro */
 #define SYSCALL(TID, INST)							\
   (/* only execute system calls in non-speculative mode */		\
-   (spec_mode ? panic("speculative syscall") : (void) 0),		\
+   (spec_mode[TID] ? panic("speculative syscall") : (void) 0),		\
    sys_syscall(TID, &regs[TID], mem_access, mem[TID], INST, TRUE))
 
 // /* default register state accessor, used by DLite */
@@ -3775,7 +3787,7 @@ ruu_dispatch(void)
 	 /* insts still available from fetch unit? */
 	 && fetch_num != 0
 	 /* on an acceptable trace path */
-	 && (ruu_include_spec || !spec_mode))
+	 && (ruu_include_spec || !spec_mode[tid]))
     {
       /* if issuing in-order, block until last op issues if inorder issue */
       if (ruu_inorder_issue
@@ -3790,7 +3802,7 @@ ruu_dispatch(void)
       inst = fetch_data[fetch_head].IR;
       tid = fetch_data[fetch_head].tid;
       regs[tid].regs_PC = fetch_data[fetch_head].regs_PC;
-      pred_PC = fetch_data[fetch_head].pred_PC;
+      pred_PC[tid] = fetch_data[fetch_head].pred_PC;
       dir_update_ptr = &(fetch_data[fetch_head].dir_update);
       stack_recover_idx = fetch_data[fetch_head].stack_recover_idx;
       pseq = fetch_data[fetch_head].ptrace_seq;
@@ -3809,17 +3821,17 @@ ruu_dispatch(void)
 
 	  /* else, syscall is only instruction in the machine, at this
 	     point we should not be in (mis-)speculative mode */
-	  if (spec_mode)
+	  if (spec_mode[tid])
 	    panic("drained and speculative");
 	}
 
       /* maintain $r0 semantics (in spec and non-spec space) */
-      regs[tid].regs_R[MD_REG_ZERO] = 0; spec_regs_R[MD_REG_ZERO] = 0;
+      regs[tid].regs_R[MD_REG_ZERO] = 0; spec_regs_R[tid][MD_REG_ZERO] = 0;
 #ifdef TARGET_ALPHA
-      regs[tid].regs_F.d[MD_REG_ZERO] = 0.0; spec_regs_F.d[MD_REG_ZERO] = 0.0;
+      regs[tid].regs_F.d[MD_REG_ZERO] = 0.0; spec_regs_F[tid].d[MD_REG_ZERO] = 0.0;
 #endif /* TARGET_ALPHA */
 
-      if (!spec_mode)
+      if (!spec_mode[tid])
 	{
 	  /* one more non-speculative instruction executed */
 	  sim_num_insn++;
@@ -3859,7 +3871,7 @@ ruu_dispatch(void)
 	     the mis-speculated instruction paths */
 #define DECLARE_FAULT(FAULT)						\
 	  {								\
-	    if (!spec_mode)						\
+	    if (!spec_mode[tid])						\
 	      fault = (FAULT);						\
 	    /* else, spec fault, ignore it, always terminate exec... */	\
 	    break;							\
@@ -3876,7 +3888,7 @@ ruu_dispatch(void)
       /* operation sets next PC */
 
       /* print retirement trace if in verbose mode */
-      if (!spec_mode && verbose)
+      if (!spec_mode[tid] && verbose)
         {
           myfprintf(stderr, "++ %10n [xor: 0x%08x] {%d} @ 0x%08p: ",
                     sim_num_insn, md_xor_regs(&regs[tid]),
@@ -3894,7 +3906,7 @@ ruu_dispatch(void)
       if (MD_OP_FLAGS(op) & F_MEM)
 	{
 	  sim_total_refs++;
-	  if (!spec_mode)
+	  if (!spec_mode[tid])
 	    sim_num_refs++;
 
 	  if (MD_OP_FLAGS(op) & F_STORE)
@@ -3902,17 +3914,17 @@ ruu_dispatch(void)
 	  else
 	    {
 	      sim_total_loads++;
-	      if (!spec_mode)
+	      if (!spec_mode[tid])
 		sim_num_loads++;
 	    }
 	}
 
       br_taken = (regs[tid].regs_NPC != (regs[tid].regs_PC + sizeof(md_inst_t))); (void)br_taken;
-      br_pred_taken = (pred_PC != (regs[tid].regs_PC + sizeof(md_inst_t)));
+      br_pred_taken = (pred_PC[tid] != (regs[tid].regs_PC + sizeof(md_inst_t)));
 
-      if ((pred_PC != regs[tid].regs_NPC && pred_perfect)
+      if ((pred_PC[tid] != regs[tid].regs_NPC && pred_perfect)
 	  || ((MD_OP_FLAGS(op) & (F_CTRL|F_DIRJMP)) == (F_CTRL|F_DIRJMP)
-	      && target_PC != pred_PC && br_pred_taken))
+	      && target_PC != pred_PC[tid] && br_pred_taken))
 	{
 	  /* Either 1) we're simulating perfect prediction and are in a
              mis-predict state and need to patch up, or 2) We're not simulating
@@ -3925,7 +3937,7 @@ ruu_dispatch(void)
 	  fetch_pred_PC[tid] = fetch_regs_PC[tid] = regs[tid].regs_NPC;
 	  /* was: if (pred_perfect) */
 	  if (pred_perfect)
-	    pred_PC = regs[tid].regs_NPC;
+	    pred_PC[tid] = regs[tid].regs_NPC;
 
 	  fetch_head = (ruu_ifq_size-1);
 	  fetch_num = 1;
@@ -3962,13 +3974,13 @@ ruu_dispatch(void)
 	  rs->op = op;
 	  rs->tid = tid;
 	  rs->PC = regs[tid].regs_PC;
-	  rs->next_PC = regs[tid].regs_NPC; rs->pred_PC = pred_PC;
+	  rs->next_PC = regs[tid].regs_NPC; rs->pred_PC = pred_PC[tid];
 	  rs->in_LSQ = FALSE;
 	  rs->ea_comp = FALSE;
 	  rs->recover_inst = FALSE;
           rs->dir_update = *dir_update_ptr;
 	  rs->stack_recover_idx = stack_recover_idx;
-	  rs->spec_mode = spec_mode;
+	  rs->spec_mode = spec_mode[tid];
 	  rs->addr = 0;
 	  /* rs->tag is already set */
 	  rs->seq = ++inst_seq;
@@ -3989,14 +4001,14 @@ ruu_dispatch(void)
 	      lsq->op = op;
 	      lsq->tid = tid;
 	      lsq->PC = regs[tid].regs_PC;
-	      lsq->next_PC = regs[tid].regs_NPC; lsq->pred_PC = pred_PC;
+	      lsq->next_PC = regs[tid].regs_NPC; lsq->pred_PC = pred_PC[tid];
 	      lsq->in_LSQ = TRUE;
 	      lsq->ea_comp = FALSE;
 	      lsq->recover_inst = FALSE;
 	      lsq->dir_update.pdir1 = lsq->dir_update.pdir2 = NULL;
 	      lsq->dir_update.pmeta = NULL;
 	      lsq->stack_recover_idx = 0;
-	      lsq->spec_mode = spec_mode;
+	      lsq->spec_mode = spec_mode[tid];
 	      lsq->addr = addr;
 	      /* lsq->tag is already set */
 	      lsq->seq = ++inst_seq;
@@ -4095,7 +4107,7 @@ ruu_dispatch(void)
       if (MD_OP_FLAGS(op) & F_CTRL)
 	sim_total_branches++;
 
-      if (!spec_mode)
+      if (!spec_mode[tid])
 	{
 #if 0 /* moved above for EIO trace file support */
 	  /* one more non-speculative instruction executed */
@@ -4114,27 +4126,27 @@ ruu_dispatch(void)
 			       /* actual target address */regs[tid].regs_NPC,
 			       /* taken? */regs[tid].regs_NPC != (regs[tid].regs_PC +
 						       sizeof(md_inst_t)),
-			       /* pred taken? */pred_PC != (regs[tid].regs_PC +
+			       /* pred taken? */pred_PC[tid] != (regs[tid].regs_PC +
 							sizeof(md_inst_t)),
-			       /* correct pred? */pred_PC == regs[tid].regs_NPC,
+			       /* correct pred? */pred_PC[tid] == regs[tid].regs_NPC,
 			       /* opcode */op,
 			       /* predictor update ptr */&rs->dir_update);
 		}
 	    }
 
 	  /* is the trace generator trasitioning into mis-speculation mode? */
-	  if (pred_PC != regs[tid].regs_NPC && !fetch_redirected)
+	  if (pred_PC[tid] != regs[tid].regs_NPC && !fetch_redirected)
 	    {
 	      /* entering mis-speculation mode, indicate this and save PC */
-	      spec_mode = TRUE;
+	      spec_mode[tid] = TRUE;
 	      rs->recover_inst = TRUE;
-	      recover_PC = regs[tid].regs_NPC;
+	      recover_PC[tid] = regs[tid].regs_NPC;
 	    }
 	}
 
       /* entered decode/allocate stage, indicate in pipe trace */
       ptrace_newstage(pseq, PST_DISPATCH,
-		      (pred_PC != regs[tid].regs_NPC) ? PEV_MPOCCURED : 0);
+		      (pred_PC[tid] != regs[tid].regs_NPC) ? PEV_MPOCCURED : 0);
       if (op == MD_NOP_OP)
 	{
 	  /* end of the line */
@@ -4164,10 +4176,10 @@ ruu_dispatch(void)
       /* check for DLite debugger entry condition */
       made_check = TRUE;
       current_dlite_tid = fetch_last_thread;
-      if (dlite_check_break(pred_PC,
+      if (dlite_check_break(pred_PC[tid],
 			    is_write ? ACCESS_WRITE : ACCESS_READ,
 			    addr, sim_num_insn, sim_cycle)) {
-	        dlite_main(regs[tid].regs_PC, pred_PC, sim_cycle, &regs[tid], mem[tid]);
+	        dlite_main(regs[tid].regs_PC, pred_PC[tid], sim_cycle, &regs[tid], mem[tid]);
 
           }
     }
@@ -4201,14 +4213,15 @@ fetch_init(void)
     fatal("out of virtual memory");
 
   fetch_num = 0;
-  fetch_tail = fetch_head = 0;
   IFQ_count = 0;
   IFQ_fcount = 0;
+  for (int tid = 0; tid < thread_num; tid++)
+    fetch_tail = fetch_head = 0;
 }
 
 /* dump contents of fetch stage registers and fetch queue */
 void
-fetch_dump(FILE *stream)			/* output stream */
+fetch_dump(int tid, FILE *stream)			/* output stream */
 {
   int num, head;
 
@@ -4217,9 +4230,9 @@ fetch_dump(FILE *stream)			/* output stream */
 
   fprintf(stream, "** fetch stage state **\n");
 
-  fprintf(stream, "spec_mode: %s\n", spec_mode ? "t" : "f");
-  myfprintf(stream, "pred_PC: 0x%08p, recover_PC: 0x%08p\n",
-	    pred_PC, recover_PC);
+  fprintf(stream, "spec_mode: %s\n", spec_mode[fetch_last_thread] ? "t" : "f");
+  myfprintf(stream, "pred_PC: 0x%08p, recover_PC[tid]: 0x%08p\n",
+	    pred_PC[tid], recover_PC[tid]);
   myfprintf(stream, "fetch_regs_PC: 0x%08p, fetch_pred_PC: 0x%08p\n",
 	    fetch_regs_PC, fetch_pred_PC);
   fprintf(stream, "\n");
@@ -4451,25 +4464,31 @@ simoo_mstate_obj(FILE *stream,			/* output stream */
   else if (!strcmp(cmd, "cv"))
     {
       /* dump event queue contents */
-      for (int index = 0; index < thread_num; index++) {
-        fprintf(stream, "** create vector state - thread %d **\n", index);
-        cv_dump(index, stream);
+      for (int tid = 0; tid < thread_num; tid++) {
+        fprintf(stream, "** create vector state - thread %d **\n", tid);
+        cv_dump(tid, stream);
       }
     }
   else if (!strcmp(cmd, "rspec"))
     {
       /* dump event queue contents */
-      rspec_dump(stream);
+      for (int tid = 0; tid < thread_num; tid++) {
+        rspec_dump(tid, stream);
+      }
     }
   else if (!strcmp(cmd, "mspec"))
     {
       /* dump event queue contents */
-      mspec_dump(stream);
+      for (int tid = 0; tid < thread_num; tid++) {
+        mspec_dump(tid, stream);
+      }
     }
   else if (!strcmp(cmd, "fetch"))
     {
       /* dump event queue contents */
-      fetch_dump(stream);
+      for (int tid = 0; tid < thread_num; tid++) {
+        fetch_dump(tid, stream);
+      }
     }
   else
     return "unknown mstate command";
@@ -4487,15 +4506,15 @@ sim_main(void)
      execution paths */
   signal(SIGFPE, SIG_IGN);
 
-  for (int index = 0; index < thread_num; index++) {
+  for (int tid = 0; tid < thread_num; tid++) {
   /* set up program entry state */
-    regs[index].regs_PC = ld_prog_entry[index];
-    regs[index].regs_NPC = regs[index].regs_PC + sizeof(md_inst_t);
+    regs[tid].regs_PC = ld_prog_entry[tid];
+    regs[tid].regs_NPC = regs[tid].regs_PC + sizeof(md_inst_t);
     /* check for DLite debugger entry condition */
-      current_dlite_tid = index;
-    if (dlite_check_break(regs[index].regs_PC, /* no access */0, /* addr */0, 0, 0)) {
-      dlite_main(regs[index].regs_PC, regs[index].regs_PC + sizeof(md_inst_t),
-          sim_cycle, &regs[index], mem[index]);
+      current_dlite_tid = tid;
+    if (dlite_check_break(regs[tid].regs_PC, /* no access */0, /* addr */0, 0, 0)) {
+      dlite_main(regs[tid].regs_PC, regs[tid].regs_PC + sizeof(md_inst_t),
+          sim_cycle, &regs[tid], mem[tid]);
     }
   }
   fetch_last_thread = 0;
@@ -4522,11 +4541,11 @@ sim_main(void)
       fprintf(stderr, "sim: ** fast forwarding %d insts **\n", fastfwd_count);
 
       for (icount=0; icount < fastfwd_count; icount++) {
-        for (int index = 0; index < thread_num; index++) {
+        for (int tid = 0; tid < thread_num; tid++) {
               /* maintain $r0 semantics */
-              regs[index].regs_R[MD_REG_ZERO] = 0;
+              regs[tid].regs_R[MD_REG_ZERO] = 0;
           #ifdef TARGET_ALPHA
-              regs[index].regs_F.d[MD_REG_ZERO] = 0.0;
+              regs[tid].regs_F.d[MD_REG_ZERO] = 0.0;
           #endif /* TARGET_ALPHA */
 
         }
@@ -4592,10 +4611,10 @@ sim_main(void)
   fprintf(stderr, "sim: ** starting performance simulation **\n");
 
   /* set up timing simulation entry state */
-  for (int index = 0; index < thread_num; index++) {
-    fetch_regs_PC[index] = regs[index].regs_PC - sizeof(md_inst_t);
-    fetch_pred_PC[index] = regs[index].regs_PC;
-    regs[index].regs_PC = regs[index].regs_PC - sizeof(md_inst_t);
+  for (int tid = 0; tid < thread_num; tid++) {
+    fetch_regs_PC[tid] = regs[tid].regs_PC - sizeof(md_inst_t);
+    fetch_pred_PC[tid] = regs[tid].regs_PC;
+    regs[tid].regs_PC = regs[tid].regs_PC - sizeof(md_inst_t);
   }
 
   /* main simulator loop, NOTE: the pipe stages are traverse in reverse order
@@ -4617,30 +4636,36 @@ sim_main(void)
       ptrace_newcycle(sim_cycle);
 
       /* commit entries from RUU/LSQ to architected register file */
+      // fprintf(stderr, "commit\n");
       ruu_commit();
 
       /* service function unit release events */
+      // fprintf(stderr, "releasefu\n");
       ruu_release_fu();
 
       /* ==> may have ready queue entries carried over from previous cycles */
 
       /* service result completions, also readies dependent operations */
       /* ==> inserts operations into ready queue --> register deps resolved */
+      // fprintf(stderr, "wb\n");
       ruu_writeback();
 
       if (!bugcompat_mode)
 	{
 	  /* try to locate memory operations that are ready to execute */
 	  /* ==> inserts operations into ready queue --> mem deps resolved */
+      // fprintf(stderr, "lsq_refresh\n");
 	  lsq_refresh();
 
 	  /* issue operations ready to execute from a previous cycle */
 	  /* <== drains ready queue <-- ready operations commence execution */
+      // fprintf(stderr, "issue\n");
 	  ruu_issue();
 	}
 
       /* decode and dispatch new operations */
       /* ==> insert ops w/ no deps or all regs ready --> reg deps resolved */
+      // fprintf(stderr, "dispatch\n");
       ruu_dispatch();
 
       if (bugcompat_mode)
@@ -4655,10 +4680,12 @@ sim_main(void)
 	}
 
       /* call instruction fetch unit if it is not blocked */
-      if (!ruu_fetch_issue_delay)
-	ruu_fetch();
+      if (!ruu_fetch_issue_delay) {
+        // fprintf(stderr, "fetch\n");
+        ruu_fetch();
+      }
       else
-	ruu_fetch_issue_delay--;
+        ruu_fetch_issue_delay--;
 
       /* update buffer occupancy stats */
       IFQ_count += fetch_num;
@@ -4670,6 +4697,7 @@ sim_main(void)
 
       /* go to next cycle */
       sim_cycle++;
+      // fprintf(stderr, "%lld\n", sim_cycle);
 
       /* finish early? */
       if (max_insts && sim_num_insn >= max_insts)
