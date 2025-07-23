@@ -389,7 +389,7 @@ static struct cache_t *itlb;
 static struct cache_t *dtlb;
 
 /* branch predictor */
-static struct bpred_t *pred;
+static struct bpred_t *pred[MAX_THREAD];
 
 /* functional unit resource pool */
 static struct res_pool *fu_pool = NULL;
@@ -892,7 +892,8 @@ sim_reg_options(struct opt_odb_t *odb)
 /* check simulator-specific option values */
 void
 sim_check_options(struct opt_odb_t *odb,        /* options database */
-		  int argc, char **argv)        /* command line arguments */
+		  int argc, char **argv,
+      int thread_num)        /* command line arguments */
 {
   char name[128], c;
   int nsets, bsize, assoc;
@@ -912,18 +913,21 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
   if (!mystricmp(pred_type, "perfect"))
     {
       /* perfect predictor */
-      pred = NULL;
+      for (int tid = 0; tid < thread_num; tid++)
+        pred[tid] = NULL;
       pred_perfect = TRUE;
     }
   else if (!mystricmp(pred_type, "taken"))
     {
       /* static predictor, not taken */
-      pred = bpred_create(BPredTaken, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+      for (int tid = 0; tid < thread_num; tid++)
+      pred[tid] = bpred_create(BPredTaken, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
   else if (!mystricmp(pred_type, "nottaken"))
     {
       /* static predictor, taken */
-      pred = bpred_create(BPredNotTaken, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+      for (int tid = 0; tid < thread_num; tid++)
+      pred[tid] = bpred_create(BPredNotTaken, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
   else if (!mystricmp(pred_type, "bimod"))
     {
@@ -934,7 +938,8 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 	fatal("bad btb config (<num_sets> <associativity>)");
 
       /* bimodal predictor, bpred_create() checks BTB_SIZE */
-      pred = bpred_create(BPred2bit,
+      for (int tid = 0; tid < thread_num; tid++)
+      pred[tid] = bpred_create(BPred2bit,
 			  /* bimod table size */bimod_config[0],
 			  /* 2lev l1 size */0,
 			  /* 2lev l2 size */0,
@@ -953,7 +958,8 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       if (btb_nelt != 2)
 	fatal("bad btb config (<num_sets> <associativity>)");
 
-      pred = bpred_create(BPred2Level,
+      for (int tid = 0; tid < thread_num; tid++)
+      pred[tid] = bpred_create(BPred2Level,
 			  /* bimod table size */0,
 			  /* 2lev l1 size */twolev_config[0],
 			  /* 2lev l2 size */twolev_config[1],
@@ -976,7 +982,8 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       if (btb_nelt != 2)
 	fatal("bad btb config (<num_sets> <associativity>)");
 
-      pred = bpred_create(BPredComb,
+      for (int tid = 0; tid < thread_num; tid++)
+      pred[tid] = bpred_create(BPredComb,
 			  /* bimod table size */bimod_config[0],
 			  /* l1 size */twolev_config[0],
 			  /* l2 size */twolev_config[1],
@@ -1309,8 +1316,10 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
                    "sim_slip / sim_num_insn", NULL);
 
   /* register predictor stats */
-  if (pred)
-    bpred_reg_stats(pred, sdb);
+  
+  for (int tid = 0; tid < thread_num; tid++)
+  if (pred[tid])
+    bpred_reg_stats(pred[tid], sdb);
 
   /* register cache stats */
   if (cache_il1
@@ -2257,11 +2266,11 @@ ruu_commit(void)
 	  LSQ_num--;
 	}
 
-      if (pred
+      if (pred[rs->tid]
 	  && bpred_spec_update == spec_CT
 	  && (MD_OP_FLAGS(rs->op) & F_CTRL))
 	{
-	  bpred_update(pred,
+	  bpred_update(pred[rs->tid],
 		       /* branch address */rs->PC,
 		       /* actual target address */rs->next_PC,
                        /* taken? */rs->next_PC != (rs->PC +
@@ -2447,12 +2456,12 @@ ruu_writeback(void)
 	}
 
       /* if we speculatively update branch-predictor, do it here */
-      if (pred
+      if (pred[rs->tid]
 	  && bpred_spec_update == spec_WB
 	  && !rs->in_LSQ
 	  && (MD_OP_FLAGS(rs->op) & F_CTRL))
 	{
-	  bpred_update(pred,
+	  bpred_update(pred[rs->tid],
 		       /* branch address */rs->PC,
 		       /* actual target address */rs->next_PC,
 		       /* taken? */rs->next_PC != (rs->PC +
@@ -4119,9 +4128,9 @@ ruu_dispatch(void)
 	  if (MD_OP_FLAGS(op) & F_CTRL)
 	    {
 	      sim_num_branches++;
-	      if (pred && bpred_spec_update == spec_ID)
+	      if (pred[tid] && bpred_spec_update == spec_ID)
 		{
-		  bpred_update(pred,
+		  bpred_update(pred[tid],
 			       /* branch address */regs[tid].regs_PC,
 			       /* actual target address */regs[tid].regs_NPC,
 			       /* taken? */regs[tid].regs_NPC != (regs[tid].regs_PC +
@@ -4335,7 +4344,7 @@ ruu_fetch(void)
       /* have a valid inst, here */
 
       /* possibly use the BTB target */
-      if (pred)
+      if (pred[fetch_last_thread])
 	{
 	  enum md_opcode op;
 
@@ -4347,7 +4356,7 @@ ruu_fetch(void)
 	     value may be 1 if bpred can only predict a direction */
 	  if (MD_OP_FLAGS(op) & F_CTRL)
 	    fetch_pred_PC[fetch_last_thread] =
-	      bpred_lookup(pred,
+	      bpred_lookup(pred[fetch_last_thread],
 			   /* branch address */fetch_regs_PC[fetch_last_thread],
 			   /* target address *//* FIXME: not computed */0,
 			   /* opcode */op,

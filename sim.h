@@ -109,7 +109,7 @@ void sim_reg_options(struct opt_odb_t *odb);
 /* main() parses options next... */
 
 /* check simulator-specific option values */
-void sim_check_options(struct opt_odb_t *odb, int argc, char **argv);
+void sim_check_options(struct opt_odb_t *odb, int argc, char **argv, int thread_num);
 
 /* register simulator-specific statistics */
 void sim_reg_stats(struct stat_sdb_t *sdb);
