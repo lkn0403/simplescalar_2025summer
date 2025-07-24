@@ -404,6 +404,7 @@ static int fetch_max;
 static int fetch_cnt;
 
 extern unsigned int current_dlite_tid;
+INST_TAG_TYPE ruu_tag_counter[MAX_THREAD];
 
 /* wedge all stat values into a counter_t */
 #define STATVAL(STAT)							\
@@ -2447,7 +2448,7 @@ ruu_writeback(void)
 	  /* recover processor state and reinit fetch to correct path */
 	  ruu_recover(rs - RUU);
 	  tracer_recover(rs->tid);
-	  bpred_recover(pred, rs->PC, rs->stack_recover_idx);
+	  bpred_recover(pred[rs->tid], rs->PC, rs->stack_recover_idx);
 
 	  /* stall fetch until I-fetch and I-decode recover */
 	  ruu_fetch_issue_delay = ruu_branch_penalty;
@@ -3991,7 +3992,7 @@ ruu_dispatch(void)
 	  rs->stack_recover_idx = stack_recover_idx;
 	  rs->spec_mode = spec_mode[tid];
 	  rs->addr = 0;
-	  /* rs->tag is already set */
+	  rs->tag = ruu_tag_counter[tid];
 	  rs->seq = ++inst_seq;
 	  rs->queued = rs->issued = rs->completed = FALSE;
 	  rs->ptrace_seq = pseq;
@@ -4019,7 +4020,7 @@ ruu_dispatch(void)
 	      lsq->stack_recover_idx = 0;
 	      lsq->spec_mode = spec_mode[tid];
 	      lsq->addr = addr;
-	      /* lsq->tag is already set */
+	      lsq->tag = ruu_tag_counter[tid];
 	      lsq->seq = ++inst_seq;
 	      lsq->queued = lsq->issued = lsq->completed = FALSE;
 	      lsq->ptrace_seq = ptrace_seq++;
