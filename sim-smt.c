@@ -2190,9 +2190,9 @@ ruu_commit(void)
           LSQ_num--;
         }
         RUU[RUU_head].tag++;
+        ruu_icount[RUU[RUU_head].tid]--;
         RUU_head = (RUU_head + 1) % RUU_size;
         RUU_num--;
-        ruu_icount[RUU[RUU_head].tid]--;
         committed++;
         continue;
       }
@@ -3046,17 +3046,16 @@ tracer_recover(int tid)
     }
   }
 
+  /* reset IFETCH state */
+  // fetch_num = 0;
+  // fetch_tail = fetch_head = 0;
   for (int index = fetch_tail; index != fetch_head;
   index = (index + ruu_ifq_size - 1) % ruu_ifq_size) {
     if (tid == fetch_data[index].tid) {
       fetch_data[index].valid = FALSE;
     }
   }
-
-  /* reset IFETCH state */
-  // fetch_num = 0;
-  // fetch_tail = fetch_head = 0;
-  // fetch_pred_PC = fetch_regs_PC = recover_PC;
+  fetch_pred_PC[tid] = fetch_regs_PC[tid] = recover_PC[tid];
 }
 
 /* initialize the speculative instruction state generator state */
@@ -3815,7 +3814,6 @@ ruu_dispatch(void)
         fetch_head = (fetch_head+1) & (ruu_ifq_size - 1);
         fetch_num--;
         fetch_icount[tid]--;
-        ruu_icount[tid]++;
         n_dispatched++;
         continue;
       }
@@ -4004,7 +4002,7 @@ ruu_dispatch(void)
 	  rs->in_LSQ = FALSE;
 	  rs->ea_comp = FALSE;
 	  rs->recover_inst = FALSE;
-          rs->dir_update = *dir_update_ptr;
+    rs->dir_update = *dir_update_ptr;
 	  rs->stack_recover_idx = stack_recover_idx;
 	  rs->spec_mode = spec_mode[tid];
 	  rs->addr = 0;
