@@ -5,6 +5,8 @@
         "stdio.h": "c",
         "misc.h": "c",
         "memory.h": "c",
-        "host.h": "c"
+        "host.h": "c",
+        "machine.h": "c",
+        "setjmp.h": "c"
     }
 }

@@ -361,7 +361,7 @@ static unsigned int ptrace_seq = 0;
 static int spec_mode[MAX_THREAD];
 
 /* cycles until fetch issue resumes */
-static unsigned ruu_fetch_issue_delay = 0;
+static unsigned ruu_fetch_issue_delay[MAX_THREAD];
 
 /* perfect prediction enabled */
 static int pred_perfect = FALSE;
@@ -389,7 +389,7 @@ static struct cache_t *itlb;
 static struct cache_t *dtlb;
 
 /* branch predictor */
-static struct bpred_t *pred[MAX_THREAD];
+static struct bpred_t *pred;
 
 /* functional unit resource pool */
 static struct res_pool *fu_pool = NULL;
@@ -399,11 +399,9 @@ static struct stat_stat_t *pcstat_stats[MAX_PCSTAT_VARS];
 static counter_t pcstat_lastvals[MAX_PCSTAT_VARS];
 static struct stat_stat_t *pcstat_sdists[MAX_PCSTAT_VARS];
 
-static int fetch_last_thread;
-static int fetch_max;
-static int fetch_cnt;
+static int fetch_thread;
+static unsigned int total_icount[MAX_THREAD];
 
-extern unsigned int current_dlite_tid;
 
 /* wedge all stat values into a counter_t */
 #define STATVAL(STAT)							\
@@ -913,21 +911,21 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
   if (!mystricmp(pred_type, "perfect"))
     {
       /* perfect predictor */
-      for (int tid = 0; tid < thread_num; tid++)
-        pred[tid] = NULL;
+
+        pred = NULL;
       pred_perfect = TRUE;
     }
   else if (!mystricmp(pred_type, "taken"))
     {
       /* static predictor, not taken */
-      for (int tid = 0; tid < thread_num; tid++)
-      pred[tid] = bpred_create(BPredTaken, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+      pred = bpred_create(BPredTaken, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
   else if (!mystricmp(pred_type, "nottaken"))
     {
       /* static predictor, taken */
-      for (int tid = 0; tid < thread_num; tid++)
-      pred[tid] = bpred_create(BPredNotTaken, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+      pred = bpred_create(BPredNotTaken, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
   else if (!mystricmp(pred_type, "bimod"))
     {
@@ -938,8 +936,8 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 	fatal("bad btb config (<num_sets> <associativity>)");
 
       /* bimodal predictor, bpred_create() checks BTB_SIZE */
-      for (int tid = 0; tid < thread_num; tid++)
-      pred[tid] = bpred_create(BPred2bit,
+
+      pred = bpred_create(BPred2bit,
 			  /* bimod table size */bimod_config[0],
 			  /* 2lev l1 size */0,
 			  /* 2lev l2 size */0,
@@ -958,8 +956,8 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       if (btb_nelt != 2)
 	fatal("bad btb config (<num_sets> <associativity>)");
 
-      for (int tid = 0; tid < thread_num; tid++)
-      pred[tid] = bpred_create(BPred2Level,
+
+      pred = bpred_create(BPred2Level,
 			  /* bimod table size */0,
 			  /* 2lev l1 size */twolev_config[0],
 			  /* 2lev l2 size */twolev_config[1],
@@ -982,8 +980,8 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       if (btb_nelt != 2)
 	fatal("bad btb config (<num_sets> <associativity>)");
 
-      for (int tid = 0; tid < thread_num; tid++)
-      pred[tid] = bpred_create(BPredComb,
+
+      pred = bpred_create(BPredComb,
 			  /* bimod table size */bimod_config[0],
 			  /* l1 size */twolev_config[0],
 			  /* l2 size */twolev_config[1],
@@ -1318,8 +1316,8 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
   /* register predictor stats */
   
   for (int tid = 0; tid < thread_num; tid++)
-  if (pred[tid])
-    bpred_reg_stats(pred[tid], sdb);
+  if (pred)
+    bpred_reg_stats(pred, sdb);
 
   /* register cache stats */
   if (cache_il1
@@ -1532,6 +1530,7 @@ struct RUU_station {
   md_inst_t IR;			/* instruction bits */
   enum md_opcode op;			/* decoded instruction opcode */
   int tid;
+  int valid;
   md_addr_t PC, next_PC, pred_PC;	/* inst PC, next PC, predicted PC */
   int in_LSQ;				/* non-zero if op is in LSQ */
   int ea_comp;				/* non-zero if op is an addr comp */
@@ -1571,20 +1570,22 @@ struct RUU_station {
 
 /* register update unit, combination of reservation stations and reorder
    buffer device, organized as a circular queue */
-static struct RUU_station *RUU;		/* register update unit */
-static int RUU_head, RUU_tail;		/* RUU head and tail pointers */
-static int RUU_num;			/* num entries currently in RUU */
+static struct RUU_station *RUU[MAX_THREAD];		/* register update unit */
+static int RUU_head[MAX_THREAD], RUU_tail[MAX_THREAD];		/* RUU head and tail pointers */
+static int RUU_num[MAX_THREAD];			/* num entries currently in RUU */
 
 /* allocate and initialize register update unit (RUU) */
 static void
 ruu_init(void)
 {
-  RUU = calloc(RUU_size, sizeof(struct RUU_station));
-  if (!RUU)
-    fatal("out of virtual memory");
+  for (int tid = 0; tid < thread_num; tid++) {
+    RUU[tid] = calloc(RUU_size, sizeof(struct RUU_station));
+    if (!RUU[tid])
+      fatal("out of virtual memory");
 
-  RUU_num = 0;
-  RUU_head = RUU_tail = 0;
+    RUU_num[tid] = 0;
+    RUU_head[tid] = RUU_tail[tid] = 0;
+  }
   RUU_count = 0;
   RUU_fcount = 0;
 }
@@ -1635,19 +1636,22 @@ ruu_dump(FILE *stream)				/* output stream */
   if (!stream)
     stream = stderr;
 
-  fprintf(stream, "** RUU state **\n");
-  fprintf(stream, "RUU_head: %d, RUU_tail: %d\n", RUU_head, RUU_tail);
-  fprintf(stream, "RUU_num: %d\n", RUU_num);
+  for (int tid = 0; tid < thread_num; tid++) {
+    fprintf(stream, "** RUU state %d **\n", tid);
+    fprintf(stream, "RUU_head: %d, RUU_tail: %d\n", RUU_head[tid], RUU_tail[tid]);
+    fprintf(stream, "RUU_num: %d\n", RUU_num[tid]);
 
-  num = RUU_num;
-  head = RUU_head;
-  while (num)
-    {
-      rs = &RUU[head];
-      ruu_dumpent(rs, rs - RUU, stream, /* header */TRUE);
-      head = (head + 1) % RUU_size;
-      num--;
-    }
+    num = RUU_num[tid];
+    head = RUU_head[tid];
+    while (num)
+      {
+        rs = &RUU[tid][head];
+        ruu_dumpent(rs, rs - RUU[tid], stream, /* header */TRUE);
+        head = (head + 1) % RUU_size;
+        num--;
+      }
+    fprintf(stream, "\n");
+  }
 }
 
 /*
@@ -1678,9 +1682,9 @@ ruu_dump(FILE *stream)				/* output stream */
  *   cycle the store executes (using a bypass network), thus stores complete
  *   in effective zero time after their effective address is known
  */
-static struct RUU_station *LSQ;         /* load/store queue */
-static int LSQ_head, LSQ_tail;          /* LSQ head and tail pointers */
-static int LSQ_num;                     /* num entries currently in LSQ */
+static struct RUU_station *LSQ[MAX_THREAD];         /* load/store queue */
+static int LSQ_head[MAX_THREAD], LSQ_tail[MAX_THREAD];          /* LSQ head and tail pointers */
+static int LSQ_num[MAX_THREAD];                     /* num entries currently in LSQ */
 
 /*
  * input dependencies for stores in the LSQ:
@@ -1697,14 +1701,16 @@ static int LSQ_num;                     /* num entries currently in LSQ */
 static void
 lsq_init(void)
 {
-  LSQ = calloc(LSQ_size, sizeof(struct RUU_station));
-  if (!LSQ)
-    fatal("out of virtual memory");
+  for (int tid = 0; tid < thread_num; tid++) {
+    LSQ[tid] = calloc(LSQ_size, sizeof(struct RUU_station));
+    if (!LSQ[tid])
+      fatal("out of virtual memory");
 
-  LSQ_num = 0;
-  LSQ_head = LSQ_tail = 0;
-  LSQ_count = 0;
-  LSQ_fcount = 0;
+    LSQ_num[tid] = 0;
+    LSQ_head[tid] = LSQ_tail[tid] = 0;
+  }
+    LSQ_count = 0;
+    LSQ_fcount = 0;
 }
 
 /* dump the contents of the RUU */
@@ -1716,20 +1722,22 @@ lsq_dump(FILE *stream)				/* output stream */
 
   if (!stream)
     stream = stderr;
+  for (int tid = 0; tid < thread_num; tid++) {
+    fprintf(stream, "** LSQ state %d **\n", tid);
+    fprintf(stream, "LSQ_head: %d, LSQ_tail: %d\n", LSQ_head[tid], LSQ_tail[tid]);
+    fprintf(stream, "LSQ_num: %d\n", LSQ_num[tid]);
 
-  fprintf(stream, "** LSQ state **\n");
-  fprintf(stream, "LSQ_head: %d, LSQ_tail: %d\n", LSQ_head, LSQ_tail);
-  fprintf(stream, "LSQ_num: %d\n", LSQ_num);
+    num = LSQ_num[tid];
+    head = LSQ_head[tid];
+    while (num)
+      {
+        rs = &LSQ[tid][head];
+        ruu_dumpent(rs, rs - LSQ[tid], stream, /* header */TRUE);
+        head = (head + 1) % LSQ_size;
+        num--;
+      }
 
-  num = LSQ_num;
-  head = LSQ_head;
-  while (num)
-    {
-      rs = &LSQ[head];
-      ruu_dumpent(rs, rs - LSQ, stream, /* header */TRUE);
-      head = (head + 1) % LSQ_size;
-      num--;
-    }
+  }
 }
 
 
@@ -1879,10 +1887,10 @@ eventq_dump(FILE *stream)			/* output stream */
       if (RSLINK_VALID(ev))
 	{
 	  struct RUU_station *rs = RSLINK_RS(ev);
-
+    int tid = rs->tid;
 	  fprintf(stream, "idx: %2d: @ %.0f\n",
-		  (int)(rs - (rs->in_LSQ ? LSQ : RUU)), (double)ev->x.when);
-	  ruu_dumpent(rs, rs - (rs->in_LSQ ? LSQ : RUU),
+		  (int)(rs - (rs->in_LSQ ? LSQ[tid] : RUU[tid])), (double)ev->x.when);
+	  ruu_dumpent(rs, rs - (rs->in_LSQ ? LSQ[tid] : RUU[tid]),
 		      stream, /* !header */FALSE);
 	}
     }
@@ -2005,8 +2013,9 @@ readyq_dump(FILE *stream)			/* output stream */
       if (RSLINK_VALID(link))
 	{
 	  struct RUU_station *rs = RSLINK_RS(link);
+    int tid = rs->tid;
 
-	  ruu_dumpent(rs, rs - (rs->in_LSQ ? LSQ : RUU),
+	  ruu_dumpent(rs, rs - (rs->in_LSQ ? LSQ[tid] : RUU[tid]),
 		      stream, /* header */TRUE);
 	}
     }
@@ -2160,7 +2169,7 @@ cv_dump(int tid, FILE *stream)				/* output stream */
       else
 	fprintf(stream, "[cv%02d]: from %s, idx: %d\n",
 		i, (ent.rs->in_LSQ ? "LSQ" : "RUU"),
-		(int)(ent.rs - (ent.rs->in_LSQ ? LSQ : RUU)));
+		(int)(ent.rs - (ent.rs->in_LSQ ? LSQ[tid] : RUU[tid])));
     }
 }
 
@@ -2169,6 +2178,7 @@ cv_dump(int tid, FILE *stream)				/* output stream */
  *  RUU_COMMIT() - instruction retirement pipeline stage
  */
 
+int last_commited = 0;
 /* this function commits the results of the oldest completed entries from the
    RUU and LSQ to the architected reg file, stores in the LSQ will commit
    their store data to the data cache at this point as well */
@@ -2178,35 +2188,48 @@ ruu_commit(void)
   int i, lat, events, committed = 0;
   static counter_t sim_ret_insn = 0;
 
-  /* all values must be retired to the architected reg file in program order */
-  while (RUU_num > 0 && committed < ruu_commit_width)
-    {
-      struct RUU_station *rs = &(RUU[RUU_head]);
+  int commit_stop[MAX_THREAD];
+  for (int i = 0; i < thread_num; i++) commit_stop[i] = 0;
 
-      if (!rs->completed)
-	{
-	  /* at least RUU entry must be complete */
-	  break;
-	}
+  int tid = last_commited;
+  /* all values must be retired to the architected reg file in program order */
+  while (RUU_num[tid] > 0 && committed < ruu_commit_width)
+    {
+      if (commit_stop[tid]) {
+        tid = (tid + 1) % thread_num;
+        if (tid == last_commited) break;
+        continue;
+      }
+0      struct RUU_station *RUU_ptr = RUU[tid];
+      struct RUU_station *LSQ_ptr = LSQ[tid];
+      int commit_RUU_head = RUU_head[tid], commit_LSQ_head = LSQ_head[tid];
+      struct RUU_station *rs = &(RUU_ptr[commit_RUU_head]);
+
+      if (!rs->completed) {
+        /* at least RUU entry must be complete */
+        commit_stop[tid] = 1;
+        continue;
+      }
 
       /* default commit events */
       events = 0;
 
       /* load/stores must retire load/store queue entry as well */
-      if (RUU[RUU_head].ea_comp)
+      if (RUU_ptr[commit_RUU_head].ea_comp)
 	{
 	  /* load/store, retire head of LSQ as well */
-	  if (LSQ_num <= 0 || !LSQ[LSQ_head].in_LSQ)
+	  if (LSQ_num[tid] <= 0 || !LSQ_ptr[commit_LSQ_head].in_LSQ)
 	    panic("RUU out of sync with LSQ");
 
 	  /* load/store operation must be complete */
-	  if (!LSQ[LSQ_head].completed)
+	  if (!LSQ_ptr[commit_LSQ_head].completed)
 	    {
 	      /* load/store operation is not yet complete */
-	      break;
+        commit_stop[tid] = 1;
+        continue;
 	    }
 
-	  if ((MD_OP_FLAGS(LSQ[LSQ_head].op) & (F_MEM|F_STORE))
+	  if ((MD_OP_FLAGS(LSQ_ptr[commit_LSQ_head].op) & (F_MEM|F_STORE))
 	      == (F_MEM|F_STORE))
 	    {
 	      struct res_template *fu;
@@ -2214,7 +2237,7 @@ ruu_commit(void)
 
 	      /* stores must retire their store value to the cache at commit,
 		 try to get a store port (functional unit allocation) */
-	      fu = res_get(fu_pool, MD_OP_FUCLASS(LSQ[LSQ_head].op));
+	      fu = res_get(fu_pool, MD_OP_FUCLASS(LSQ_ptr[commit_LSQ_head].op));
 	      if (fu)
 		{
 		  /* reserve the functional unit */
@@ -2229,7 +2252,7 @@ ruu_commit(void)
 		    {
 		      /* commit store value to D-cache */
 		      lat =
-			cache_access(cache_dl1, Write, LSQ[LSQ_head].tid, (LSQ[LSQ_head].addr&~3),
+			cache_access(cache_dl1, Write, LSQ_ptr[commit_LSQ_head].tid, (LSQ_ptr[commit_LSQ_head].addr&~3),
 				     NULL, 4, sim_cycle, NULL, NULL);
 		      if (lat > cache_dl1_lat)
 			events |= PEV_CACHEMISS;
@@ -2240,7 +2263,7 @@ ruu_commit(void)
 		    {
 		      /* access the D-TLB */
 		      lat =
-			cache_access(dtlb, Read, LSQ[LSQ_head].tid, (LSQ[LSQ_head].addr & ~3),
+			cache_access(dtlb, Read, LSQ_ptr[commit_LSQ_head].tid, (LSQ_ptr[commit_LSQ_head].addr & ~3),
 				     NULL, 4, sim_cycle, NULL, NULL);
 		      if (lat > 1)
 			events |= PEV_TLBMISS;
@@ -2254,23 +2277,23 @@ ruu_commit(void)
 	    }
 
 	  /* invalidate load/store operation instance */
-	  LSQ[LSQ_head].tag++;
-          sim_slip += (sim_cycle - LSQ[LSQ_head].slip);
+	  LSQ_ptr[commit_LSQ_head].tag++;
+          sim_slip += (sim_cycle - LSQ_ptr[commit_LSQ_head].slip);
    
 	  /* indicate to pipeline trace that this instruction retired */
-	  ptrace_newstage(LSQ[LSQ_head].ptrace_seq, PST_COMMIT, events);
-	  ptrace_endinst(LSQ[LSQ_head].ptrace_seq);
+	  ptrace_newstage(LSQ_ptr[commit_LSQ_head].ptrace_seq, PST_COMMIT, events);
+	  ptrace_endinst(LSQ_ptr[commit_LSQ_head].ptrace_seq);
 
 	  /* commit head of LSQ as well */
-	  LSQ_head = (LSQ_head + 1) % LSQ_size;
-	  LSQ_num--;
+	  LSQ_head[tid] = (LSQ_head[tid] + 1) % LSQ_size;
+	  LSQ_num[tid]--;
 	}
 
-      if (pred[rs->tid]
+      if (pred
 	  && bpred_spec_update == spec_CT
 	  && (MD_OP_FLAGS(rs->op) & F_CTRL))
 	{
-	  bpred_update(pred[rs->tid],
+	  bpred_update(pred,
 		       /* branch address */rs->PC,
 		       /* actual target address */rs->next_PC,
                        /* taken? */rs->next_PC != (rs->PC +
@@ -2283,27 +2306,27 @@ ruu_commit(void)
 	}
 
       /* invalidate RUU operation instance */
-      RUU[RUU_head].tag++;
-      sim_slip += (sim_cycle - RUU[RUU_head].slip);
+      RUU_ptr[commit_RUU_head].tag++;
+      sim_slip += (sim_cycle - RUU_ptr[commit_RUU_head].slip);
       /* print retirement trace if in verbose mode */
       if (verbose)
 	{
 	  sim_ret_insn++;
-	  myfprintf(stderr, "%10n @ 0x%08p: ", sim_ret_insn, RUU[RUU_head].PC);
- 	  md_print_insn(RUU[RUU_head].IR, RUU[RUU_head].PC, stderr);
-	  if (MD_OP_FLAGS(RUU[RUU_head].op) & F_MEM)
-	    myfprintf(stderr, "  mem: 0x%08p", RUU[RUU_head].addr);
+	  myfprintf(stderr, "%10n @ 0x%08p: ", sim_ret_insn, RUU_ptr[commit_RUU_head].PC);
+ 	  md_print_insn(RUU_ptr[commit_RUU_head].IR, RUU_ptr[commit_RUU_head].PC, stderr);
+	  if (MD_OP_FLAGS(RUU_ptr[commit_RUU_head].op) & F_MEM)
+	    myfprintf(stderr, "  mem: 0x%08p", RUU_ptr[commit_RUU_head].addr);
 	  fprintf(stderr, "\n");
 	  /* fflush(stderr); */
 	}
 
       /* indicate to pipeline trace that this instruction retired */
-      ptrace_newstage(RUU[RUU_head].ptrace_seq, PST_COMMIT, events);
-      ptrace_endinst(RUU[RUU_head].ptrace_seq);
+      ptrace_newstage(RUU_ptr[commit_RUU_head].ptrace_seq, PST_COMMIT, events);
+      ptrace_endinst(RUU_ptr[commit_RUU_head].ptrace_seq);
 
       /* commit head entry of RUU */
-      RUU_head = (RUU_head + 1) % RUU_size;
-      RUU_num--;
+      RUU_head[tid] = (RUU_head[tid] + 1) % RUU_size;
+      RUU_num[tid]--;
 
       /* one more instruction committed to architected state */
       committed++;
@@ -2324,15 +2347,14 @@ ruu_commit(void)
 /* recover processor microarchitecture state back to point of the
    mis-predicted branch at RUU[BRANCH_INDEX] */
 static void
-ruu_recover(int branch_index)			/* index of mis-pred branch */
+ruu_recover(int tid, int branch_index)			/* index of mis-pred branch */
 {
-  int i, RUU_index = RUU_tail, LSQ_index = LSQ_tail;
-  int RUU_prev_tail = RUU_tail, LSQ_prev_tail = LSQ_tail;
+  int i, RUU_index = RUU_tail[tid], LSQ_index = LSQ_tail[tid];
+  int RUU_prev_tail = RUU_tail[tid], LSQ_prev_tail = LSQ_tail[tid];
 
   /* recover from the tail of the RUU towards the head until the branch index
      is reached, this direction ensures that the LSQ can be synchronized with
      the RUU */
-  int recover_thread = RUU[branch_index].tid;
 
   /* go to first element to squash */
   RUU_index = (RUU_index + (RUU_size-1)) % RUU_size;
@@ -2342,69 +2364,69 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
   while (RUU_index != branch_index)
     {
       /* the RUU should not drain since the mispredicted branch will remain */
-      if (!RUU_num)
+      if (!RUU_num[tid])
 	panic("empty RUU");
 
       /* should meet up with the tail first */
-      if (RUU_index == RUU_head)
+      if (RUU_index == RUU_head[tid])
 	panic("RUU head and tail broken");
 
       /* is this operation an effective addr calc for a load or store? */
-      if (RUU[RUU_index].ea_comp)
+      if (RUU[tid][RUU_index].ea_comp)
 	{
 	  /* should be at least one load or store in the LSQ */
-	  if (!LSQ_num)
+	  if (!LSQ_num[tid])
 	    panic("RUU and LSQ out of sync");
 
 	  /* recover any resources consumed by the load or store operation */
-    if (LSQ[LSQ_index].tid == recover_thread) {
+
       for (i=0; i<MAX_ODEPS; i++)
         {
-          RSLINK_FREE_LIST(LSQ[LSQ_index].odep_list[i]);
+          RSLINK_FREE_LIST(LSQ[tid][LSQ_index].odep_list[i]);
           /* blow away the consuming op list */
-          LSQ[LSQ_index].odep_list[i] = NULL;
+          LSQ[tid][LSQ_index].odep_list[i] = NULL;
         }
         
       /* squash this LSQ entry */
-      LSQ[LSQ_index].tag++;
-    }
+      LSQ[tid][LSQ_index].tag++;
+    
 	  /* indicate in pipetrace that this instruction was squashed */
-	  ptrace_endinst(LSQ[LSQ_index].ptrace_seq);
+	  ptrace_endinst(LSQ[tid][LSQ_index].ptrace_seq);
 
 	  /* go to next earlier LSQ slot */
 	  LSQ_prev_tail = LSQ_index;
 	  LSQ_index = (LSQ_index + (LSQ_size-1)) % LSQ_size;
-	  LSQ_num--;
+	  LSQ_num[tid]--;
 	}
 
       /* recover any resources used by this RUU operation */
-    if (RUU[RUU_index].tid == recover_thread) {
+
       for (i=0; i<MAX_ODEPS; i++)
         {
-          RSLINK_FREE_LIST(RUU[RUU_index].odep_list[i]);
+          RSLINK_FREE_LIST(RUU[tid][RUU_index].odep_list[i]);
           /* blow away the consuming op list */
-          RUU[RUU_index].odep_list[i] = NULL;
+          RUU[tid][RUU_index].odep_list[i] = NULL;
         }
       /* squash this RUU entry */
-      RUU[RUU_index].tag++;
-    }
+      RUU[tid][RUU_index].tag++;
+    
       /* indicate in pipetrace that this instruction was squashed */
-      ptrace_endinst(RUU[RUU_index].ptrace_seq);
+      ptrace_endinst(RUU[tid][RUU_index].ptrace_seq);
 
       /* go to next earlier slot in the RUU */
       RUU_prev_tail = RUU_index;
       RUU_index = (RUU_index + (RUU_size-1)) % RUU_size;
-      RUU_num--;
+      RUU_num[tid]--;
     }
 
   /* reset head/tail pointers to point to the mis-predicted branch */
-  RUU_tail = RUU_prev_tail;
-  LSQ_tail = LSQ_prev_tail;
+  RUU_tail[tid] = RUU_prev_tail;
+  LSQ_tail[tid] = LSQ_prev_tail;
 
   /* revert create vector back to last precise create vector state, NOTE:
      this is accomplished by resetting all the copied-on-write bits in the
      USE_SPEC_CV bit vector */
-  BITMAP_CLEAR_MAP(use_spec_cv[recover_thread], CV_BMAP_SZ);
+  BITMAP_CLEAR_MAP(use_spec_cv[tid], CV_BMAP_SZ);
 
   /* FIXME: could reset functional units at squash time */
 }
@@ -2426,6 +2448,7 @@ static void
 ruu_writeback(void)
 {
   int i;
+  int tid;
   struct RUU_station *rs;
 
   /* service all completed events */
@@ -2437,6 +2460,7 @@ ruu_writeback(void)
 
       /* operation has completed */
       rs->completed = TRUE;
+      tid = rs->tid;
 
       /* does this operation reveal a mis-predicted branch? */
       if (rs->recover_inst)
@@ -2445,23 +2469,23 @@ ruu_writeback(void)
 	    panic("mis-predicted load or store?!?!?");
 
 	  /* recover processor state and reinit fetch to correct path */
-	  ruu_recover(rs - RUU);
-	  tracer_recover(rs->tid);
-	  bpred_recover(pred[rs->tid], rs->PC, rs->stack_recover_idx);
+	  ruu_recover(tid, rs - RUU[tid]);
+	  tracer_recover(tid);
+	  bpred_recover(pred, rs->PC, rs->stack_recover_idx);
 
 	  /* stall fetch until I-fetch and I-decode recover */
-	  ruu_fetch_issue_delay = ruu_branch_penalty;
+	  ruu_fetch_issue_delay[tid] = ruu_branch_penalty;
 
 	  /* continue writeback of the branch/control instruction */
 	}
 
       /* if we speculatively update branch-predictor, do it here */
-      if (pred[rs->tid]
+      if (pred
 	  && bpred_spec_update == spec_WB
 	  && !rs->in_LSQ
 	  && (MD_OP_FLAGS(rs->op) & F_CTRL))
 	{
-	  bpred_update(pred[rs->tid],
+	  bpred_update(pred,
 		       /* branch address */rs->PC,
 		       /* actual target address */rs->next_PC,
 		       /* taken? */rs->next_PC != (rs->PC +
@@ -2575,34 +2599,35 @@ static void
 lsq_refresh(void)
 {
   int i, j, index;
-  int sta_known[MAX_THREAD];
   int n_std_unknowns[MAX_THREAD];
   md_addr_t std_unknowns[MAX_THREAD][MAX_STD_UNKNOWNS];
 
   /* scan entire queue for ready loads: scan from oldest instruction
      (head) until we reach the tail or an unresolved store, after which no
      other instruction will become ready */
-  for (int tid=0; tid<thread_num; tid++) { n_std_unknowns[tid] = 0; sta_known[tid] = 1; }
+  for (int tid=0; tid<thread_num; tid++) {n_std_unknowns[tid] = 0;}
 
-  for (i=0, index=LSQ_head;
-       i < LSQ_num;
+  for (int tid = 0; tid < thread_num; tid++) {
+    struct RUU_station *LSQ_ptr = LSQ[tid];
+    
+  for (i=0, index=LSQ_head[tid];
+       i < LSQ_num[tid];
        i++, index=(index + 1) % LSQ_size)
     {
-      int tid = LSQ[index].tid;
-      if (!sta_known[tid]) continue;
+      int tid = LSQ[tid][index].tid;
+
       /* terminate search for ready loads after first unresolved store,
 	 as no later load could be resolved in its presence */
       if (/* store? */
-	  (MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_STORE)) == (F_MEM|F_STORE))
+	  (MD_OP_FLAGS(LSQ_ptr[index].op) & (F_MEM|F_STORE)) == (F_MEM|F_STORE))
 	{
-	  if (!STORE_ADDR_READY(&LSQ[index]))
+	  if (!STORE_ADDR_READY(&LSQ_ptr[index]))
 	    {
 	      /* FIXME: a later STD + STD known could hide the STA unknown */
 	      /* sta unknown, blocks all later loads, stop search */
-        sta_known[tid] = 0;
-	      continue;
+        break;
 	    }
-	  else if (!OPERANDS_READY(&LSQ[index]))
+	  else if (!OPERANDS_READY(&LSQ_ptr[index]))
 	    {
 	      /* sta known, but std unknown, may block a later store, record
 		 this address for later referral, we use an array here because
@@ -2610,41 +2635,42 @@ lsq_refresh(void)
 		 very small */
 	      if (n_std_unknowns[tid] == MAX_STD_UNKNOWNS)
 		fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-	      std_unknowns[tid][n_std_unknowns[tid]++] = LSQ[index].addr;
+	      std_unknowns[tid][n_std_unknowns[tid]++] = LSQ_ptr[index].addr;
 	    }
 	  else /* STORE_ADDR_READY() && OPERANDS_READY() */
 	    {
 	      /* a later STD known hides an earlier STD unknown */
 	      for (j=0; j<n_std_unknowns[tid]; j++)
 		{
-		  if (std_unknowns[tid][j] == /* STA/STD known */LSQ[index].addr)
+		  if (std_unknowns[tid][j] == /* STA/STD known */LSQ_ptr[index].addr)
 		    std_unknowns[tid][j] = /* bogus addr */0;
 		}
 	    }
 	}
 
       if (/* load? */
-	  ((MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD))
-	  && /* queued? */!LSQ[index].queued
-	  && /* waiting? */!LSQ[index].issued
-	  && /* completed? */!LSQ[index].completed
-	  && /* regs ready? */OPERANDS_READY(&LSQ[index]))
+	  ((MD_OP_FLAGS(LSQ_ptr[index].op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD))
+	  && /* queued? */!LSQ_ptr[index].queued
+	  && /* waiting? */!LSQ_ptr[index].issued
+	  && /* completed? */!LSQ_ptr[index].completed
+	  && /* regs ready? */OPERANDS_READY(&LSQ_ptr[index]))
 	{
 	  /* no STA unknown conflict (because we got to this check), check for
 	     a STD unknown conflict */
 	  for (j=0; j<n_std_unknowns[tid]; j++)
 	    {
 	      /* found a relevant STD unknown? */
-	      if (std_unknowns[tid][j] == LSQ[index].addr)
+	      if (std_unknowns[tid][j] == LSQ_ptr[index].addr)
 		break;
 	    }
 	  if (j == n_std_unknowns[tid])
 	    {
 	      /* no STA or STD unknown conflicts, put load on ready queue */
-	      readyq_enqueue(&LSQ[index]);
+	      readyq_enqueue(&LSQ[tid][index]);
 	    }
 	}
     }
+  }
 }
 
 
@@ -2689,6 +2715,7 @@ ruu_issue(void)
       if (RSLINK_VALID(node))
 	{
 	  struct RUU_station *rs = RSLINK_RS(node);
+    int tid = rs->tid;
 
 	  /* issue operation, both reg and mem deps have been satisfied */
 	  if (!OPERANDS_READY(rs) || !rs->queued
@@ -2747,8 +2774,8 @@ ruu_issue(void)
 			     first scan LSQ to see if a store forward is
 			     possible, if not, access the data cache */
 			  load_lat = 0;
-			  i = (rs - LSQ);
-			  if (i != LSQ_head)
+			  i = (rs - LSQ[tid]);
+			  if (i != LSQ_head[tid])
 			    {
 			      for (;;)
 				{
@@ -2756,8 +2783,8 @@ ruu_issue(void)
 				  i = (i + (LSQ_size-1)) % LSQ_size;
 
 				  /* FIXME: not dealing with partials! */
-				  if ((MD_OP_FLAGS(LSQ[i].op) & F_STORE)
-				      && (LSQ[i].addr == rs->addr))
+				  if ((MD_OP_FLAGS(LSQ[tid][i].op) & F_STORE)
+				      && (LSQ[tid][i].addr == rs->addr))
 				    {
 				      /* hit in the LSQ */
 				      load_lat = 1;
@@ -2765,7 +2792,7 @@ ruu_issue(void)
 				    }
 
 				  /* scan finished? */
-				  if (i == LSQ_head)
+				  if (i == LSQ_head[tid])
 				    break;
 				}
 			    }
@@ -2775,7 +2802,7 @@ ruu_issue(void)
 			    {
 			      int valid_addr = MD_VALID_ADDR(rs->tid, rs->addr);
 
-			      if (!spec_mode[rs->tid] && !valid_addr)
+			      if (!spec_mode[tid] && !valid_addr)
 				sim_invalid_addrs++;
 
 			      /* no! go to the data cache if addr is valid */
@@ -2783,7 +2810,7 @@ ruu_issue(void)
 				{
 				  /* access the cache if non-faulting */
 				  load_lat =
-				    cache_access(cache_dl1, Read, rs->tid,
+				    cache_access(cache_dl1, Read, tid,
 						 (rs->addr & ~3), NULL, 4,
 						 sim_cycle, NULL, NULL);
 				  if (load_lat > cache_dl1_lat)
@@ -2998,9 +3025,9 @@ struct fetch_rec {
   int stack_recover_idx;		/* branch predictor RSB index */
   unsigned int ptrace_seq;		/* print trace sequence id */
 };
-static struct fetch_rec *fetch_data;	/* IFETCH -> DISPATCH inst queue */
-static int fetch_num;			/* num entries in IF -> DIS queue */
-static int fetch_tail, fetch_head;	/* head and tail pointers of queue */
+static struct fetch_rec *fetch_data[MAX_THREAD];	/* IFETCH -> DISPATCH inst queue */
+static int fetch_num[MAX_THREAD];			/* num entries in IF -> DIS queue */
+static int fetch_tail[MAX_THREAD], fetch_head[MAX_THREAD];	/* head and tail pointers of queue */
 
 /* recover instruction trace generator state to precise state state immediately
    before the first mis-predicted branch; this is accomplished by resetting
@@ -3041,20 +3068,21 @@ tracer_recover(int tid)
   /* if pipetracing, indicate squash of instructions in the inst fetch queue */
   if (ptrace_active)
     {
-      while (fetch_num != 0)
+      while (fetch_num[tid] != 0)
 	{
 	  /* squash the next instruction from the IFETCH -> DISPATCH queue */
-	  ptrace_endinst(fetch_data[fetch_head].ptrace_seq);
+	  ptrace_endinst(fetch_data[tid][fetch_head[tid]].ptrace_seq);
 
 	  /* consume instruction from IFETCH -> DISPATCH queue */
-	  fetch_head = (fetch_head+1) & (ruu_ifq_size - 1);
-	  fetch_num--;
+	  fetch_head[tid] = (fetch_head[tid]+1) & (ruu_ifq_size - 1);
+	  fetch_num[tid]--;
 	}
     }
 
   /* reset IFETCH state */
-  fetch_num = 0;
-  fetch_tail = fetch_head = 0;
+  total_icount[tid] -= fetch_num[tid];
+  fetch_num[tid] = 0;
+  fetch_tail[tid] = fetch_head[tid] = 0;
   fetch_pred_PC[tid] = fetch_regs_PC[tid] = recover_PC[tid];
 }
 
@@ -3755,6 +3783,7 @@ simoo_reg_obj(int tid,
 /* the last operation that ruu_dispatch() attempted to dispatch, for
    implementing in-order issue */
 static struct RS_link last_op = RSLINK_NULL_DATA;
+int last_dispatch_thread = 0;
 
 /* dispatch instructions from the IFETCH -> DISPATCH queue: instructions are
    first decoded, then they allocated RUU (and LSQ for load/stores) resources
@@ -3778,7 +3807,7 @@ ruu_dispatch(void)
   int is_write;				/* store? */
   int made_check;			/* used to ensure DLite entry */
   int br_taken, br_pred_taken;		/* if br, taken?  predicted taken? */
-  int fetch_redirected = FALSE;
+  int fetch_redirected[MAX_THREAD] = {};
   byte_t temp_byte = 0;			/* temp variable for spec mem access */
   half_t temp_half = 0;			/* " ditto " */
   word_t temp_word = 0;			/* " ditto " */
@@ -3789,32 +3818,39 @@ ruu_dispatch(void)
 
   made_check = FALSE;
   n_dispatched = 0;
+  int dispatch_tid = last_dispatch_thread;
+
   while (/* instruction decode B/W left? */
 	 n_dispatched < (ruu_decode_width * fetch_speed)
 	 /* RUU and LSQ not full? */
-	 && RUU_num < RUU_size && LSQ_num < LSQ_size
+	 //  && RUU_num < RUU_size && LSQ_num < LSQ_size
 	 /* insts still available from fetch unit? */
-	 && fetch_num != 0
+	 && fetch_num[dispatch_tid] != 0
 	 /* on an acceptable trace path */
-	 && (ruu_include_spec || !spec_mode[tid]))
+	 && (ruu_include_spec || !spec_mode[dispatch_tid]))
     {
+      if (RUU_num[dispatch_tid] >= RUU_size || LSQ_num[dispatch_tid] >=LSQ_size || !fetch_num[dispatch_tid]) {
+        dispatch_tid = (dispatch_tid + 1) % thread_num;
+        if (dispatch_tid == last_dispatch_thread) break;
+        continue;
+      }
       /* if issuing in-order, block until last op issues if inorder issue */
-      if (ruu_inorder_issue
-	  && (last_op.rs && RSLINK_VALID(&last_op)
-	      && !OPERANDS_READY(last_op.rs)))
-	{
-	  /* stall until last operation is ready to issue */
-	  break;
-	}
+      if (ruu_inorder_issue && (last_op.rs && RSLINK_VALID(&last_op)
+	      && !OPERANDS_READY(last_op.rs))) {
+        /* stall until last operation is ready to issue */
+        break;
+      }
+      int d_fetch_head = fetch_head[dispatch_tid];
+      struct fetch_rec *fetch_data_ptr = fetch_data[dispatch_tid];
 
       /* get the next instruction from the IFETCH -> DISPATCH queue */
-      inst = fetch_data[fetch_head].IR;
-      tid = fetch_data[fetch_head].tid;
-      regs[tid].regs_PC = fetch_data[fetch_head].regs_PC;
-      pred_PC[tid] = fetch_data[fetch_head].pred_PC;
-      dir_update_ptr = &(fetch_data[fetch_head].dir_update);
-      stack_recover_idx = fetch_data[fetch_head].stack_recover_idx;
-      pseq = fetch_data[fetch_head].ptrace_seq;
+      inst = fetch_data_ptr[d_fetch_head].IR;
+      tid = fetch_data_ptr[d_fetch_head].tid;
+      regs[tid].regs_PC = fetch_data_ptr[d_fetch_head].regs_PC;
+      pred_PC[tid] = fetch_data_ptr[d_fetch_head].pred_PC;
+      dir_update_ptr = &(fetch_data_ptr[d_fetch_head].dir_update);
+      stack_recover_idx = fetch_data_ptr[d_fetch_head].stack_recover_idx;
+      pseq = fetch_data_ptr[d_fetch_head].ptrace_seq;
 
       /* decode the inst */
       MD_SET_OPCODE(op, inst);
@@ -3823,16 +3859,15 @@ ruu_dispatch(void)
       regs[tid].regs_NPC = regs[tid].regs_PC + sizeof(md_inst_t);
 
       /* drain RUU for TRAPs and system calls */
-      if (MD_OP_FLAGS(op) & F_TRAP)
-	{
-	  if (RUU_num != 0)
-	    break;
+      if (MD_OP_FLAGS(op) & F_TRAP) {
+        if (RUU_num[tid] != 0)
+          break;
 
-	  /* else, syscall is only instruction in the machine, at this
-	     point we should not be in (mis-)speculative mode */
-	  if (spec_mode[tid])
-	    panic("drained and speculative");
-	}
+        /* else, syscall is only instruction in the machine, at this
+          point we should not be in (mis-)speculative mode */
+        if (spec_mode[tid])
+          panic("drained and speculative");
+	    }
 
       /* maintain $r0 semantics (in spec and non-spec space) */
       regs[tid].regs_R[MD_REG_ZERO] = 0; spec_regs_R[tid][MD_REG_ZERO] = 0;
@@ -3840,11 +3875,10 @@ ruu_dispatch(void)
       regs[tid].regs_F.d[MD_REG_ZERO] = 0.0; spec_regs_F[tid].d[MD_REG_ZERO] = 0.0;
 #endif /* TARGET_ALPHA */
 
-      if (!spec_mode[tid])
-	{
-	  /* one more non-speculative instruction executed */
-	  sim_num_insn++;
-	}
+      if (!spec_mode[tid]) {
+        /* one more non-speculative instruction executed */
+        sim_num_insn++;
+      }
 
       /* default effective address (none) and access */
       addr = 0; is_write = FALSE;
@@ -3948,14 +3982,15 @@ ruu_dispatch(void)
 	  if (pred_perfect)
 	    pred_PC[tid] = regs[tid].regs_NPC;
 
-	  fetch_head = (ruu_ifq_size-1);
-	  fetch_num = 1;
-	  fetch_tail = 0;
+    total_icount[tid] -= fetch_num[tid] - 1;
+	  fetch_head[tid] = (ruu_ifq_size-1);
+	  fetch_num[tid] = 1;
+	  fetch_tail[tid] = 0;
 
 	  if (!pred_perfect)
-	    ruu_fetch_issue_delay = ruu_branch_penalty;
+	    ruu_fetch_issue_delay[tid] = ruu_branch_penalty;
 
-	  fetch_redirected = TRUE;
+	  fetch_redirected[tid] = TRUE;
 	}
 
       /* is this a NOP */
@@ -3977,7 +4012,7 @@ ruu_dispatch(void)
 	   */
 
 	  /* fill in RUU reservation station */
-	  rs = &RUU[RUU_tail];
+	  rs = &RUU[tid][RUU_tail[tid]];
           rs->slip = sim_cycle - 1;
 	  rs->IR = inst;
 	  rs->op = op;
@@ -4004,7 +4039,7 @@ ruu_dispatch(void)
 	      rs->ea_comp = TRUE;
 
 	      /* fill in LSQ reservation station */
-	      lsq = &LSQ[LSQ_tail];
+	      lsq = &LSQ[tid][LSQ_tail[tid]];
               lsq->slip = sim_cycle - 1;
 	      lsq->IR = inst;
 	      lsq->op = op;
@@ -4052,10 +4087,11 @@ ruu_dispatch(void)
 
 	      /* install operation in the RUU and LSQ */
 	      n_dispatched++;
-	      RUU_tail = (RUU_tail + 1) % RUU_size;
-	      RUU_num++;
-	      LSQ_tail = (LSQ_tail + 1) % LSQ_size;
-	      LSQ_num++;
+	      RUU_tail[tid] = (RUU_tail[tid] + 1) % RUU_size;
+	      RUU_num[tid]++;
+	      LSQ_tail[tid] = (LSQ_tail[tid] + 1) % LSQ_size;
+	      LSQ_num[tid]++;
+        total_icount[tid]--;
 
 	      if (OPERANDS_READY(rs))
 		{
@@ -4087,8 +4123,9 @@ ruu_dispatch(void)
 
 	      /* install operation in the RUU */
 	      n_dispatched++;
-	      RUU_tail = (RUU_tail + 1) % RUU_size;
-	      RUU_num++;
+	      RUU_tail[tid] = (RUU_tail[tid] + 1) % RUU_size;
+	      RUU_num[tid]++;
+        total_icount[tid]--;
 
 	      /* issue op if all its reg operands are ready (no mem input) */
 	      if (OPERANDS_READY(rs))
@@ -4109,6 +4146,7 @@ ruu_dispatch(void)
 	{
 	  /* this is a NOP, no need to update RUU/LSQ state */
 	  rs = NULL;
+    total_icount[tid]--;
 	}
 
       /* one more instruction executed, speculative or otherwise */
@@ -4128,9 +4166,9 @@ ruu_dispatch(void)
 	  if (MD_OP_FLAGS(op) & F_CTRL)
 	    {
 	      sim_num_branches++;
-	      if (pred[tid] && bpred_spec_update == spec_ID)
+	      if (pred && bpred_spec_update == spec_ID)
 		{
-		  bpred_update(pred[tid],
+		  bpred_update(pred,
 			       /* branch address */regs[tid].regs_PC,
 			       /* actual target address */regs[tid].regs_NPC,
 			       /* taken? */regs[tid].regs_NPC != (regs[tid].regs_PC +
@@ -4144,7 +4182,7 @@ ruu_dispatch(void)
 	    }
 
 	  /* is the trace generator trasitioning into mis-speculation mode? */
-	  if (pred_PC[tid] != regs[tid].regs_NPC && !fetch_redirected)
+	  if (pred_PC[tid] != regs[tid].regs_NPC && !fetch_redirected[tid])
 	    {
 	      /* entering mis-speculation mode, indicate this and save PC */
 	      spec_mode[tid] = TRUE;
@@ -4179,12 +4217,12 @@ ruu_dispatch(void)
 	}
 
       /* consume instruction from IFETCH -> DISPATCH queue */
-      fetch_head = (fetch_head+1) & (ruu_ifq_size - 1);
-      fetch_num--;
+      fetch_head[tid] = (fetch_head[tid]+1) & (ruu_ifq_size - 1);
+      fetch_num[tid]--;
 
       /* check for DLite debugger entry condition */
       made_check = TRUE;
-      current_dlite_tid = fetch_last_thread;
+
       if (dlite_check_break(pred_PC[tid],
 			    is_write ? ACCESS_WRITE : ACCESS_READ,
 			    addr, sim_num_insn, sim_cycle)) {
@@ -4196,7 +4234,7 @@ ruu_dispatch(void)
   /* need to enter DLite at least once per cycle */
   if (!made_check)
     {
-        current_dlite_tid = fetch_last_thread;
+
       if (dlite_check_break(/* no next PC */0,
 			    is_write ? ACCESS_WRITE : ACCESS_READ,
 			    addr, sim_num_insn, sim_cycle)) {
@@ -4216,16 +4254,17 @@ static void
 fetch_init(void)
 {
   /* allocate the IFETCH -> DISPATCH instruction queue */
-  fetch_data =
-    (struct fetch_rec *)calloc(ruu_ifq_size, sizeof(struct fetch_rec));
-  if (!fetch_data)
-    fatal("out of virtual memory");
+  for (int tid = 0; tid < thread_num; tid++) {
+    fetch_data[tid] =
+      (struct fetch_rec *)calloc(ruu_ifq_size, sizeof(struct fetch_rec));
+    if (!fetch_data[tid])
+      fatal("out of virtual memory");
 
-  fetch_num = 0;
+    fetch_num[tid] = 0;
+    fetch_tail[tid] = fetch_head[tid] = 0;
+  }
   IFQ_count = 0;
   IFQ_fcount = 0;
-  for (int tid = 0; tid < thread_num; tid++)
-    fetch_tail = fetch_head = 0;
 }
 
 /* dump contents of fetch stage registers and fetch queue */
@@ -4239,7 +4278,7 @@ fetch_dump(int tid, FILE *stream)			/* output stream */
 
   fprintf(stream, "** fetch stage state **\n");
 
-  fprintf(stream, "spec_mode: %s\n", spec_mode[fetch_last_thread] ? "t" : "f");
+  fprintf(stream, "spec_mode: %s\n", spec_mode[fetch_thread] ? "t" : "f");
   myfprintf(stream, "pred_PC: 0x%08p, recover_PC[tid]: 0x%08p\n",
 	    pred_PC[tid], recover_PC[tid]);
   myfprintf(stream, "fetch_regs_PC: 0x%08p, fetch_pred_PC: 0x%08p\n",
@@ -4247,19 +4286,19 @@ fetch_dump(int tid, FILE *stream)			/* output stream */
   fprintf(stream, "\n");
 
   fprintf(stream, "** fetch queue contents **\n");
-  fprintf(stream, "fetch_num: %d\n", fetch_num);
+  fprintf(stream, "fetch_num: %d\n", fetch_num[tid]);
   fprintf(stream, "fetch_head: %d, fetch_tail: %d\n",
-	  fetch_head, fetch_tail);
+	  fetch_head[tid], fetch_tail[tid]);
 
-  num = fetch_num;
-  head = fetch_head;
+  num = fetch_num[tid];
+  head = fetch_head[tid];
   while (num)
     {
       fprintf(stream, "idx: %2d: inst: `", head);
-      md_print_insn(fetch_data[head].IR, fetch_data[head].regs_PC, stream);
+      md_print_insn(fetch_data[tid][head].IR, fetch_data[tid][head].regs_PC, stream);
       fprintf(stream, "'\n");
       myfprintf(stream, "         regs_PC: 0x%08p, pred_PC: 0x%08p\n",
-		fetch_data[head].regs_PC, fetch_data[head].pred_PC);
+		fetch_data[tid][head].regs_PC, fetch_data[tid][head].pred_PC);
       head = (head + 1) & (ruu_ifq_size - 1);
       num--;
     }
@@ -4267,6 +4306,18 @@ fetch_dump(int tid, FILE *stream)			/* output stream */
 
 static int last_inst_missed = FALSE;
 static int last_inst_tmissed = FALSE;
+
+static void
+fetch_choice(void)
+{
+  fetch_thread = 0;
+  unsigned int min_icount = total_icount[0];
+  for (int tid = 1; tid < thread_num; tid++) {
+    if (total_icount[tid] < min_icount) {
+      fetch_thread = tid; min_icount = total_icount[tid];
+    }
+  }
+}
 
 /* fetch up as many instruction as one branch prediction and one cache line
    acess will support without overflowing the IFETCH -> DISPATCH QUEUE */
@@ -4278,25 +4329,28 @@ ruu_fetch(void)
   int stack_recover_idx;
   int branch_cnt;
 
+
   for (i=0, branch_cnt=0;
        /* fetch up to as many instruction as the DISPATCH stage can decode */
        i < (ruu_decode_width * fetch_speed)
        /* fetch until IFETCH -> DISPATCH queue fills */
-       && fetch_num < ruu_ifq_size
+       && fetch_num[fetch_thread] < ruu_ifq_size
+       && !ruu_fetch_issue_delay[fetch_thread]
        /* and no IFETCH blocking condition encountered */
        && !done;
        i++)
     {
+      int ruu_fetch_tail = fetch_tail[fetch_thread];
       /* fetch an instruction at the next predicted fetch address */
-      fetch_regs_PC[fetch_last_thread] = fetch_pred_PC[fetch_last_thread];
+      fetch_regs_PC[fetch_thread] = fetch_pred_PC[fetch_thread];
 
       /* is this a bogus text address? (can happen on mis-spec path) */
-      if (ld_text_base[fetch_last_thread] <= fetch_regs_PC[fetch_last_thread]
-	  && fetch_regs_PC[fetch_last_thread] < (ld_text_base[fetch_last_thread]+ld_text_size[fetch_last_thread])
-	  && !(fetch_regs_PC[fetch_last_thread] & (sizeof(md_inst_t)-1)))
+      if (ld_text_base[fetch_thread] <= fetch_regs_PC[fetch_thread]
+	  && fetch_regs_PC[fetch_thread] < (ld_text_base[fetch_thread]+ld_text_size[fetch_thread])
+	  && !(fetch_regs_PC[fetch_thread] & (sizeof(md_inst_t)-1)))
 	{
 	  /* read instruction from memory */
-	  MD_FETCH_INST(inst, mem[fetch_last_thread], fetch_regs_PC[fetch_last_thread]);
+	  MD_FETCH_INST(inst, mem[fetch_thread], fetch_regs_PC[fetch_thread]);
 
 	  /* address is within program text, read instruction from memory */
 	  lat = cache_il1_lat;
@@ -4304,7 +4358,7 @@ ruu_fetch(void)
 	    {
 	      /* access the I-cache */
 	      lat =
-		cache_access(cache_il1, Read, fetch_last_thread, IACOMPRESS(fetch_regs_PC[fetch_last_thread]),
+		cache_access(cache_il1, Read, fetch_thread, IACOMPRESS(fetch_regs_PC[fetch_thread]),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
 			     NULL, NULL);
 	      if (lat > cache_il1_lat)
@@ -4316,7 +4370,7 @@ ruu_fetch(void)
 	      /* access the I-TLB, NOTE: this code will initiate
 		 speculative TLB misses */
 	      tlb_lat =
-		cache_access(itlb, Read, fetch_last_thread, IACOMPRESS(fetch_regs_PC[fetch_last_thread]),
+		cache_access(itlb, Read, fetch_thread, IACOMPRESS(fetch_regs_PC[fetch_thread]),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
 			     NULL, NULL);
 	      if (tlb_lat > 1)
@@ -4330,7 +4384,7 @@ ruu_fetch(void)
 	  if (lat != cache_il1_lat)
 	    {
 	      /* I-cache miss, block fetch until it is resolved */
-	      ruu_fetch_issue_delay += lat - 1;
+	      ruu_fetch_issue_delay[fetch_thread] += lat - 1;
 	      break;
 	    }
 	  /* else, I-cache/I-TLB hit */
@@ -4343,35 +4397,35 @@ ruu_fetch(void)
 
       /* have a valid inst, here */
 
+	  struct fetch_rec *fetch_data_ptr = fetch_data[fetch_thread];
       /* possibly use the BTB target */
-      if (pred[fetch_last_thread])
+      if (pred)
 	{
 	  enum md_opcode op;
 
 	  /* pre-decode instruction, used for bpred stats recording */
 	  MD_SET_OPCODE(op, inst);
-	  
 	  /* get the next predicted fetch address; only use branch predictor
 	     result for branches (assumes pre-decode bits); NOTE: returned
 	     value may be 1 if bpred can only predict a direction */
 	  if (MD_OP_FLAGS(op) & F_CTRL)
-	    fetch_pred_PC[fetch_last_thread] =
-	      bpred_lookup(pred[fetch_last_thread],
-			   /* branch address */fetch_regs_PC[fetch_last_thread],
+	    fetch_pred_PC[fetch_thread] =
+	      bpred_lookup(pred,
+			   /* branch address */fetch_regs_PC[fetch_thread],
 			   /* target address *//* FIXME: not computed */0,
 			   /* opcode */op,
 			   /* call? */MD_IS_CALL(op),
 			   /* return? */MD_IS_RETURN(op),
-			   /* updt */&(fetch_data[fetch_tail].dir_update),
+			   /* updt */&(fetch_data_ptr[ruu_fetch_tail].dir_update),
 			   /* RSB index */&stack_recover_idx);
 	  else
-	    fetch_pred_PC[fetch_last_thread] = 0;
+	    fetch_pred_PC[fetch_thread] = 0;
 
 	  /* valid address returned from branch predictor? */
-	  if (!fetch_pred_PC[fetch_last_thread])
+	  if (!fetch_pred_PC[fetch_thread])
 	    {
 	      /* no predicted taken target, attempt not taken target */
-	      fetch_pred_PC[fetch_last_thread] = fetch_regs_PC[fetch_last_thread] + sizeof(md_inst_t);
+	      fetch_pred_PC[fetch_thread] = fetch_regs_PC[fetch_thread] + sizeof(md_inst_t);
 	    }
 	  else
 	    {
@@ -4385,22 +4439,22 @@ ruu_fetch(void)
 	{
 	  /* no predictor, just default to predict not taken, and
 	     continue fetching instructions linearly */
-	  fetch_pred_PC[fetch_last_thread] = fetch_regs_PC[fetch_last_thread] + sizeof(md_inst_t);
+	  fetch_pred_PC[fetch_thread] = fetch_regs_PC[fetch_thread] + sizeof(md_inst_t);
 	}
 
       /* commit this instruction to the IFETCH -> DISPATCH queue */
-      fetch_data[fetch_tail].IR = inst;
-      fetch_data[fetch_tail].tid = fetch_last_thread;
-      fetch_data[fetch_tail].regs_PC = fetch_regs_PC[fetch_last_thread];
-      fetch_data[fetch_tail].pred_PC = fetch_pred_PC[fetch_last_thread];
-      fetch_data[fetch_tail].stack_recover_idx = stack_recover_idx;
-      fetch_data[fetch_tail].ptrace_seq = ptrace_seq++;
+      fetch_data_ptr[ruu_fetch_tail].IR = inst;
+      fetch_data_ptr[ruu_fetch_tail].tid = fetch_thread;
+      fetch_data_ptr[ruu_fetch_tail].regs_PC = fetch_regs_PC[fetch_thread];
+      fetch_data_ptr[ruu_fetch_tail].pred_PC = fetch_pred_PC[fetch_thread];
+      fetch_data_ptr[ruu_fetch_tail].stack_recover_idx = stack_recover_idx;
+      fetch_data_ptr[ruu_fetch_tail].ptrace_seq = ptrace_seq++;
 
       /* for pipe trace */
-      ptrace_newinst(fetch_data[fetch_tail].ptrace_seq,
-		     inst, fetch_data[fetch_tail].regs_PC,
+      ptrace_newinst(fetch_data_ptr[ruu_fetch_tail].ptrace_seq,
+		     inst, fetch_data_ptr[ruu_fetch_tail].regs_PC,
 		     0);
-      ptrace_newstage(fetch_data[fetch_tail].ptrace_seq,
+      ptrace_newstage(fetch_data_ptr[ruu_fetch_tail].ptrace_seq,
 		      PST_IFETCH,
 		      ((last_inst_missed ? PEV_CACHEMISS : 0)
 		       | (last_inst_tmissed ? PEV_TLBMISS : 0)));
@@ -4408,12 +4462,10 @@ ruu_fetch(void)
       last_inst_tmissed = FALSE;
 
       /* adjust instruction fetch queue */
-      fetch_tail = (fetch_tail + 1) & (ruu_ifq_size - 1);
-      fetch_num++;
-      if (fetch_cnt == fetch_max - 1) fetch_last_thread = (fetch_last_thread + 1) % thread_num;
-      fetch_cnt = (fetch_cnt + 1) % fetch_max;
+      fetch_tail[fetch_thread] = (ruu_fetch_tail + 1) & (ruu_ifq_size - 1);
+      fetch_num[fetch_thread]++;
+      total_icount[fetch_thread]++;
     }
-    fetch_cnt = 0;
 }
 
 /* default machine state accessor, used by DLite */
@@ -4520,15 +4572,11 @@ sim_main(void)
     regs[tid].regs_PC = ld_prog_entry[tid];
     regs[tid].regs_NPC = regs[tid].regs_PC + sizeof(md_inst_t);
     /* check for DLite debugger entry condition */
-      current_dlite_tid = tid;
     if (dlite_check_break(regs[tid].regs_PC, /* no access */0, /* addr */0, 0, 0)) {
       dlite_main(regs[tid].regs_PC, regs[tid].regs_PC + sizeof(md_inst_t),
           sim_cycle, &regs[tid], mem[tid]);
     }
   }
-  fetch_last_thread = 0;
-  fetch_cnt = 0;
-  fetch_max = ruu_ifq_size / thread_num;
   /* fast forward simulator loop, performs functional simulation for
      FASTFWD_COUNT insts, then turns on performance (timing) simulation */
   if (fastfwd_count > 0)
@@ -4558,9 +4606,9 @@ sim_main(void)
           #endif /* TARGET_ALPHA */
 
         }
-
+    fetch_choice();
 	  /* get the next instruction to execute */
-	  MD_FETCH_INST(inst, mem[fetch_last_thread], regs[fetch_last_thread].regs_PC);
+	  MD_FETCH_INST(inst, mem[fetch_thread], regs[fetch_thread].regs_PC);
 
 	  /* set default reference address */
 	  addr = 0; is_write = FALSE;
@@ -4576,7 +4624,7 @@ sim_main(void)
 	    {
 #define DEFINST(OP,MSK,NAME,OPFORM,RES,FLAGS,O1,O2,I1,I2,I3)		\
 	    case OP:							\
-	      SYMCAT(OP,_IMPL(fetch_last_thread));						\
+	      SYMCAT(OP,_IMPL(fetch_thread));						\
 	      break;
 #define DEFLINK(OP,MSK,NAME,MASK,SHIFT)					\
 	    case OP:							\
@@ -4591,7 +4639,7 @@ sim_main(void)
 	    }
 
 	  if (fault != md_fault_none)
-	    fatal("fault (%d) detected @ 0x%08p", fault, regs[fetch_last_thread].regs_PC);
+	    fatal("fault (%d) detected @ 0x%08p", fault, regs[fetch_thread].regs_PC);
 
 	  /* update memory access stats */
 	  if (MD_OP_FLAGS(op) & F_MEM)
@@ -4601,19 +4649,17 @@ sim_main(void)
 	    }
 
 	  /* check for DLite debugger entry condition */
-          current_dlite_tid = fetch_last_thread;
-	  if (dlite_check_break(regs[fetch_last_thread].regs_NPC,
+
+	  if (dlite_check_break(regs[fetch_thread].regs_NPC,
 				is_write ? ACCESS_WRITE : ACCESS_READ,
 				addr, sim_num_insn, sim_num_insn)) {
-	    dlite_main(regs[fetch_last_thread].regs_PC, regs[fetch_last_thread].regs_NPC, sim_num_insn, &regs[fetch_last_thread], mem[fetch_last_thread]);
+	    dlite_main(regs[fetch_thread].regs_PC, regs[fetch_thread].regs_NPC, sim_num_insn, &regs[fetch_thread], mem[fetch_thread]);
 
         }
 
 	  /* go to the next instruction */
-	  regs[fetch_last_thread].regs_PC = regs[fetch_last_thread].regs_NPC;
-	  regs[fetch_last_thread].regs_NPC += sizeof(md_inst_t);
-    if (fetch_cnt == fetch_max - 1) fetch_last_thread = (fetch_last_thread + 1) % thread_num;
-    fetch_cnt = (fetch_cnt + 1) % fetch_max;
+	  regs[fetch_thread].regs_PC = regs[fetch_thread].regs_NPC;
+	  regs[fetch_thread].regs_NPC += sizeof(md_inst_t);
 	}
     }
 
@@ -4631,15 +4677,17 @@ sim_main(void)
   for (;;)
     {
       /* RUU/LSQ sanity checks */
-      if (RUU_num < LSQ_num)
-	panic("RUU_num < LSQ_num");
-      if (((RUU_head + RUU_num) % RUU_size) != RUU_tail)
-	panic("RUU_head/RUU_tail wedged");
-      if (((LSQ_head + LSQ_num) % LSQ_size) != LSQ_tail)
-	panic("LSQ_head/LSQ_tail wedged");
+      for (int tid = 0; tid < thread_num; tid++) {
+        if (RUU_num[fetch_thread] < LSQ_num[fetch_thread])
+          panic("RUU_num < LSQ_num");
+        if (((RUU_head[fetch_thread] + RUU_num[fetch_thread]) % RUU_size) != RUU_tail[fetch_thread])
+          panic("RUU_head/RUU_tail wedged");
+        if (((LSQ_head[fetch_thread] + LSQ_num[fetch_thread]) % LSQ_size) != LSQ_tail[fetch_thread])
+          panic("LSQ_head/LSQ_tail wedged");
+      }
 
       /* check if pipetracing is still active */
-      ptrace_check_active(fetch_regs_PC[fetch_last_thread], sim_num_insn, sim_cycle);
+      ptrace_check_active(fetch_regs_PC[fetch_thread], sim_num_insn, sim_cycle);
 
       /* indicate new cycle in pipetrace */
       ptrace_newcycle(sim_cycle);
@@ -4689,20 +4737,21 @@ sim_main(void)
 	}
 
       /* call instruction fetch unit if it is not blocked */
-      if (!ruu_fetch_issue_delay) {
-        // fprintf(stderr, "fetch\n");
-        ruu_fetch();
-      }
-      else
-        ruu_fetch_issue_delay--;
+      fetch_choice();
+      ruu_fetch();
+      for (int tid = 0; tid < thread_num; tid++)
+        if (ruu_fetch_issue_delay[tid])
+          ruu_fetch_issue_delay[tid]--;
 
       /* update buffer occupancy stats */
-      IFQ_count += fetch_num;
-      IFQ_fcount += ((fetch_num == ruu_ifq_size) ? 1 : 0);
-      RUU_count += RUU_num;
-      RUU_fcount += ((RUU_num == RUU_size) ? 1 : 0);
-      LSQ_count += LSQ_num;
-      LSQ_fcount += ((LSQ_num == LSQ_size) ? 1 : 0);
+      for (int tid = 0; tid < thread_num; tid++) {
+        IFQ_count += fetch_num[tid];
+        IFQ_fcount += ((fetch_num[tid] == ruu_ifq_size) ? 1 : 0);
+        RUU_count += RUU_num[tid];
+        RUU_fcount += ((RUU_num[tid] == RUU_size) ? 1 : 0);
+        LSQ_count += LSQ_num[tid];
+        LSQ_fcount += ((LSQ_num[tid] == LSQ_size) ? 1 : 0);
+      }
 
       /* go to next cycle */
       sim_cycle++;
