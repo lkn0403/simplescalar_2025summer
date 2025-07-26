@@ -286,14 +286,18 @@ SRCS =	main.c sim-smt.c \
 	target-pisa/pisa.c target-pisa/loader.c target-pisa/syscall.c \
 	target-pisa/symbol.c \
 	target-alpha/alpha.c target-alpha/loader.c target-alpha/syscall.c \
-	target-alpha/symbol.c
+	target-alpha/symbol.c\
+	target-alpha-linux/alpha.c target-alpha-linux/loader.c target-alpha-linux/syscall.c \
+	target-alpha-linux/symbol.c 
 
 HDRS =	syscall.h memory.h regs.h sim.h loader.h cache.h bpred.h ptrace.h \
 	eventq.h resource.h endian.h dlite.h symbol.h eval.h bitmap.h \
 	eio.h range.h version.h endian.h misc.h \
 	target-pisa/pisa.h target-pisa/pisabig.h target-pisa/pisalittle.h \
 	target-pisa/pisa.def target-pisa/ecoff.h \
-	target-alpha/alpha.h target-alpha/alpha.def target-alpha/ecoff.h
+	target-alpha/alpha.h target-alpha/alpha.def target-alpha/ecoff.h\
+	target-alpha-linux/alpha.h target-alpha-linu/alpha.def target-alpha-linu/ecoff.h\
+	target-alpha-linu/elf64.h
 
 #
 # common objects
@@ -362,6 +366,18 @@ config-alpha:
 	$(LN) target-alpha$(X)loader.c loader.c
 	$(LN) target-alpha$(X)symbol.c symbol.c
 	$(LN) target-alpha$(X)syscall.c syscall.c
+	-$(RMDIR) tests
+	$(LNDIR) tests-alpha tests
+
+config-alpha-linux:
+	-$(RM) config.h machine.h machine.c machine.def loader.c symbol.c syscall.c
+	$(LN) target-alpha-linux$(X)config.h config.h
+	$(LN) target-alpha-linux$(X)alpha.h machine.h
+	$(LN) target-alpha-linux$(X)alpha.c machine.c
+	$(LN) target-alpha-linux$(X)alpha.def machine.def
+	$(LN) target-alpha-linux$(X)loader.c loader.c
+	$(LN) target-alpha-linux$(X)symbol.c symbol.c
+	$(LN) target-alpha-linux$(X)syscall.c syscall.c
 	-$(RMDIR) tests
 	$(LNDIR) tests-alpha tests
 
@@ -498,6 +514,10 @@ sim-outorder.$(OEXT): host.h misc.h machine.h machine.def regs.h memory.h
 sim-outorder.$(OEXT): options.h stats.h eval.h cache.h loader.h syscall.h
 sim-outorder.$(OEXT): bpred.h resource.h bitmap.h ptrace.h range.h dlite.h
 sim-outorder.$(OEXT): sim.h
+sim-smt.$(OEXT): host.h misc.h machine.h machine.def regs.h memory.h
+sim-smt.$(OEXT): options.h stats.h eval.h cache.h loader.h syscall.h
+sim-smt.$(OEXT): bpred.h resource.h bitmap.h ptrace.h range.h dlite.h
+sim-smt.$(OEXT): sim.h
 memory.$(OEXT): host.h misc.h machine.h machine.def options.h stats.h eval.h
 memory.$(OEXT): memory.h
 regs.$(OEXT): host.h misc.h machine.h machine.def loader.h regs.h memory.h
