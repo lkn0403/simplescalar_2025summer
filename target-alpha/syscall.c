@@ -909,6 +909,10 @@ struct osf_tbl_sysinfo
   long wait;		/* wait time */
 };
 
+extern int thread_end[MAX_THREAD];
+
+extern char output_buffer[MAX_THREAD][OUTPUT_BUFFER_SIZE];
+extern size_t output_buf_pos[MAX_THREAD];
 
 /* OSF SYSCALL -- standard system call sequence
    the kernel expects arguments to be passed with the normal C calling
@@ -965,8 +969,9 @@ sys_syscall(int tid,
     {
     case OSF_SYS_exit:
       /* exit jumps to the target set in main() */
-      longjmp(sim_exit_buf,
-	      /* exitcode + fudge */(regs->regs_R[MD_REG_A0] & 0xff) + 1);
+    //   longjmp(sim_exit_buf,
+	//       /* exitcode + fudge */(regs->regs_R[MD_REG_A0] & 0xff) + 1);
+	thread_end[tid] = 1;
       break;
 
     case OSF_SYS_read:
@@ -1030,9 +1035,17 @@ sys_syscall(int tid,
 	    /* perform program output request */
 
 	    do {
+			if (output_buf_pos[tid] + regs->regs_R[MD_REG_A2] < OUTPUT_BUFFER_SIZE) {
 	      /*nwritten*/regs->regs_R[MD_REG_V0] =
-	        write(/*fd*/regs->regs_R[MD_REG_A0],
-		      buf, /*nbytes*/regs->regs_R[MD_REG_A2]);
+			(qword_t) memcpy(&output_buffer[tid][output_buf_pos[tid]], buf, regs->regs_R[MD_REG_A2]);
+			output_buf_pos[tid] += regs->regs_R[MD_REG_A2];
+	        // write(/*fd*/regs->regs_R[MD_REG_A0],
+		    //   buf, /*nbytes*/regs->regs_R[MD_REG_A2]);
+			} else {
+				regs->regs_R[MD_REG_V0] = -1;
+				regs->regs_R[MD_REG_A3] = -1;
+				break;
+			}
 	    } while (/*nwritten*/regs->regs_R[MD_REG_V0] == -1
 		     && errno == EAGAIN);
 	  }

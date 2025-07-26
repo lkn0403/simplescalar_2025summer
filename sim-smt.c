@@ -401,6 +401,11 @@ static struct stat_stat_t *pcstat_sdists[MAX_PCSTAT_VARS];
 
 static int fetch_thread;
 static unsigned int total_icount[MAX_THREAD];
+int thread_end[MAX_THREAD] = {};
+
+char output_buffer[MAX_THREAD][OUTPUT_BUFFER_SIZE];
+size_t output_buf_pos[MAX_THREAD] = {};
+
 
 
 /* wedge all stat values into a counter_t */
@@ -1406,6 +1411,8 @@ sim_init_smt(int num)
     regs_init(&regs[tid]);
     mem[tid] = mem_create(mem_name);
     mem_init(mem[tid]);
+
+    thread_end[tid] = 0;
   }
 
 }
@@ -2200,7 +2207,7 @@ ruu_commit(void)
         if (tid == last_commited) break;
         continue;
       }
-0      struct RUU_station *RUU_ptr = RUU[tid];
+      struct RUU_station *RUU_ptr = RUU[tid];
       struct RUU_station *LSQ_ptr = LSQ[tid];
       int commit_RUU_head = RUU_head[tid], commit_LSQ_head = LSQ_head[tid];
       struct RUU_station *rs = &(RUU_ptr[commit_RUU_head]);
@@ -2666,7 +2673,7 @@ lsq_refresh(void)
 	  if (j == n_std_unknowns[tid])
 	    {
 	      /* no STA or STD unknown conflicts, put load on ready queue */
-	      readyq_enqueue(&LSQ[tid][index]);
+	      readyq_enqueue(&LSQ_ptr[index]);
 	    }
 	}
     }
@@ -4219,7 +4226,7 @@ ruu_dispatch(void)
       /* consume instruction from IFETCH -> DISPATCH queue */
       fetch_head[tid] = (fetch_head[tid]+1) & (ruu_ifq_size - 1);
       fetch_num[tid]--;
-
+      dispatch_tid = (dispatch_tid + 1) % thread_num;
       /* check for DLite debugger entry condition */
       made_check = TRUE;
 
@@ -4737,8 +4744,8 @@ sim_main(void)
 	}
 
       /* call instruction fetch unit if it is not blocked */
-      fetch_choice();
       ruu_fetch();
+      fetch_choice();
       for (int tid = 0; tid < thread_num; tid++)
         if (ruu_fetch_issue_delay[tid])
           ruu_fetch_issue_delay[tid]--;
@@ -4758,7 +4765,22 @@ sim_main(void)
       // fprintf(stderr, "%lld\n", sim_cycle);
 
       /* finish early? */
-      if (max_insts && sim_num_insn >= max_insts)
-	return;
+      if (max_insts && sim_num_insn >= max_insts) {
+        for (int tid = 0; tid < thread_num; tid++) {
+          fprintf(stdout, "[Thread %d Output]:\n", tid);
+          fwrite(output_buffer[tid], 1, output_buf_pos[tid], stdout);
+        }}
+        return;
+      int progend = 0;
+      for (int tid = 0; tid < thread_num; tid++) {
+        if (thread_end[tid]) progend++;
+      }
+      if (progend == thread_num) {
+        for (int tid = 0; tid < thread_num; tid++) {
+          fprintf(stdout, "[Thread %d Output]:\n", tid);
+          fwrite(output_buffer[tid], 1, output_buf_pos[tid], stdout);
+        }
+        longjmp(sim_exit_buf, 1);
+      }
     }
 }

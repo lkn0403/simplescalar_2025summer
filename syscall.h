@@ -85,6 +85,7 @@
  *
  */
 
+#define OUTPUT_BUFFER_SIZE (1 << 20)
 
 /* syscall proxy handler, architect registers and memory are assumed to be
    precise when this function is called, register and memory are updated with

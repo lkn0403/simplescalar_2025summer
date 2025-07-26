@@ -7,6 +7,7 @@
         "memory.h": "c",
         "host.h": "c",
         "machine.h": "c",
-        "setjmp.h": "c"
+        "setjmp.h": "c",
+        "resource.h": "c"
     }
 }
